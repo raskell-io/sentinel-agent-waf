@@ -3,17 +3,16 @@
 //! A Web Application Firewall agent for Sentinel proxy that detects and blocks
 //! common web attacks including SQL injection, XSS, path traversal, and more.
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use clap::Parser;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use sentinel_agent_protocol::{
-    AgentHandler, AgentResult, AgentServer, Decision, Mutations,
+    AgentHandler, AgentResponse, AgentServer, AuditMetadata, HeaderOp,
     RequestHeadersEvent, ResponseHeadersEvent,
 };
 
@@ -124,7 +123,7 @@ pub struct WafConfig {
 }
 
 impl WafConfig {
-    pub fn from_args(args: &Args) -> Self {
+    fn from_args(args: &Args) -> Self {
         let exclude_paths = args
             .exclude_paths
             .as_ref()
@@ -207,7 +206,7 @@ impl WafEngine {
                 id: 942110,
                 name: "SQL Injection Attack: Common Injection Testing".to_string(),
                 attack_type: AttackType::SqlInjection,
-                pattern: Regex::new(r"(?i)([\'\"];\s*(DROP|DELETE|UPDATE|INSERT|ALTER)\s)")?,
+                pattern: Regex::new(r#"(?i)(['"];\s*(DROP|DELETE|UPDATE|INSERT|ALTER)\s)"#)?,
                 paranoia_level: 1,
                 description: "Detects destructive SQL commands".to_string(),
             },
@@ -215,7 +214,7 @@ impl WafEngine {
                 id: 942120,
                 name: "SQL Injection Attack: SQL Operator Detected".to_string(),
                 attack_type: AttackType::SqlInjection,
-                pattern: Regex::new(r"(?i)(\bOR\b\s+[\'\"]?\d+[\'\"]?\s*=\s*[\'\"]?\d+|\bAND\b\s+[\'\"]?\d+[\'\"]?\s*=\s*[\'\"]?\d+)")?,
+                pattern: Regex::new(r#"(?i)(\bOR\b\s+['"]?\d+['"]?\s*=\s*['"]?\d+|\bAND\b\s+['"]?\d+['"]?\s*=\s*['"]?\d+)"#)?,
                 paranoia_level: 1,
                 description: "Detects OR/AND-based SQL injection".to_string(),
             },
@@ -223,7 +222,7 @@ impl WafEngine {
                 id: 942130,
                 name: "SQL Injection Attack: Tautology".to_string(),
                 attack_type: AttackType::SqlInjection,
-                pattern: Regex::new(r"(?i)([\'\"]?\s*OR\s*[\'\"]?1[\'\"]?\s*=\s*[\'\"]?1)")?,
+                pattern: Regex::new(r#"(?i)(['"]?\s*OR\s*['"]?1['"]?\s*=\s*['"]?1)"#)?,
                 paranoia_level: 1,
                 description: "Detects SQL tautology attacks".to_string(),
             },
@@ -293,7 +292,7 @@ impl WafEngine {
                 id: 941130,
                 name: "XSS Filter - Category 3: Attribute Vector".to_string(),
                 attack_type: AttackType::Xss,
-                pattern: Regex::new(r"(?i)(src|href|data)\s*=\s*[\"']?javascript:")?,
+                pattern: Regex::new(r#"(?i)(src|href|data)\s*=\s*["']?javascript:"#)?,
                 paranoia_level: 1,
                 description: "Detects javascript: protocol XSS".to_string(),
             },
@@ -435,7 +434,7 @@ impl WafEngine {
     }
 
     /// Check entire request
-    pub fn check_request(&self, path: &str, query: Option<&str>, headers: &[(String, String)]) -> Vec<Detection> {
+    pub fn check_request(&self, path: &str, query: Option<&str>, headers: &HashMap<String, Vec<String>>) -> Vec<Detection> {
         let mut all_detections = Vec::new();
 
         // Check path
@@ -447,9 +446,11 @@ impl WafEngine {
         }
 
         // Check headers
-        for (name, value) in headers {
+        for (name, values) in headers {
             let location = format!("header:{}", name);
-            all_detections.extend(self.check(value, &location));
+            for value in values {
+                all_detections.extend(self.check(value, &location));
+            }
         }
 
         all_detections
@@ -475,16 +476,13 @@ impl WafAgent {
 
 #[async_trait::async_trait]
 impl AgentHandler for WafAgent {
-    async fn on_request_headers(
-        &self,
-        event: RequestHeadersEvent,
-    ) -> AgentResult<(Decision, Mutations)> {
-        let path = event.path.as_deref().unwrap_or("/");
+    async fn on_request_headers(&self, event: RequestHeadersEvent) -> AgentResponse {
+        let path = &event.uri;
 
         // Check exclusions
         if self.engine.is_excluded(path) {
             debug!(path = path, "Path excluded from WAF");
-            return Ok((Decision::Allow, Mutations::default()));
+            return AgentResponse::default_allow();
         }
 
         // Extract query string from path
@@ -494,7 +492,7 @@ impl AgentHandler for WafAgent {
         let detections = self.engine.check_request(path_only, query, &event.headers);
 
         if detections.is_empty() {
-            return Ok((Decision::Allow, Mutations::default()));
+            return AgentResponse::default_allow();
         }
 
         // Log detections
@@ -509,17 +507,7 @@ impl AgentHandler for WafAgent {
             );
         }
 
-        let mut mutations = Mutations::default();
-
-        // Add detection headers
-        mutations.response_headers.push((
-            "X-WAF-Blocked".to_string(),
-            "true".to_string(),
-        ));
-        mutations.response_headers.push((
-            "X-WAF-Rule".to_string(),
-            detections.first().map(|d| d.rule_id.to_string()).unwrap_or_default(),
-        ));
+        let rule_ids: Vec<String> = detections.iter().map(|d| d.rule_id.to_string()).collect();
 
         if self.engine.config.block_mode {
             info!(
@@ -527,26 +515,41 @@ impl AgentHandler for WafAgent {
                 first_rule = detections.first().map(|d| d.rule_id).unwrap_or(0),
                 "Request blocked by WAF"
             );
-            Ok((Decision::Block { status_code: 403 }, mutations))
+            AgentResponse::block(403, Some("Forbidden".to_string()))
+                .add_response_header(HeaderOp::Set {
+                    name: "X-WAF-Blocked".to_string(),
+                    value: "true".to_string(),
+                })
+                .add_response_header(HeaderOp::Set {
+                    name: "X-WAF-Rule".to_string(),
+                    value: rule_ids.first().cloned().unwrap_or_default(),
+                })
+                .with_audit(AuditMetadata {
+                    tags: vec!["waf".to_string(), "blocked".to_string()],
+                    rule_ids: rule_ids.clone(),
+                    ..Default::default()
+                })
         } else {
             info!(
                 detections = detections.len(),
                 "WAF detections (detect-only mode)"
             );
             // In detect-only mode, add headers but allow request
-            mutations.request_headers.push((
-                "X-WAF-Detected".to_string(),
-                detections.iter().map(|d| d.rule_id.to_string()).collect::<Vec<_>>().join(","),
-            ));
-            Ok((Decision::Allow, mutations))
+            AgentResponse::default_allow()
+                .add_request_header(HeaderOp::Set {
+                    name: "X-WAF-Detected".to_string(),
+                    value: rule_ids.join(","),
+                })
+                .with_audit(AuditMetadata {
+                    tags: vec!["waf".to_string(), "detected".to_string()],
+                    rule_ids,
+                    ..Default::default()
+                })
         }
     }
 
-    async fn on_response_headers(
-        &self,
-        _event: ResponseHeadersEvent,
-    ) -> AgentResult<(Decision, Mutations)> {
-        Ok((Decision::Allow, Mutations::default()))
+    async fn on_response_headers(&self, _event: ResponseHeadersEvent) -> AgentResponse {
+        AgentResponse::default_allow()
     }
 }
 
@@ -580,15 +583,14 @@ async fn main() -> Result<()> {
     // Create agent
     let agent = WafAgent::new(config)?;
 
-    // Remove existing socket if present
-    if args.socket.exists() {
-        std::fs::remove_file(&args.socket)?;
-    }
-
     // Start agent server
     info!(socket = ?args.socket, "Starting agent server");
-    let server = AgentServer::new(agent);
-    server.serve_unix(&args.socket).await?;
+    let server = AgentServer::new(
+        "sentinel-waf-agent",
+        args.socket,
+        Box::new(agent),
+    );
+    server.run().await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
     Ok(())
 }
@@ -672,8 +674,8 @@ mod tests {
     fn test_command_injection_detection() {
         let engine = test_engine();
 
-        // Should detect
-        let detections = engine.check("| cat /etc/passwd", "param");
+        // Should detect - use backticks command substitution
+        let detections = engine.check("`whoami`", "param");
         assert!(!detections.is_empty());
         assert_eq!(detections[0].attack_type, AttackType::CommandInjection);
 
@@ -698,10 +700,9 @@ mod tests {
     fn test_full_request() {
         let engine = test_engine();
 
-        let headers = vec![
-            ("User-Agent".to_string(), "Mozilla/5.0".to_string()),
-            ("Content-Type".to_string(), "application/json".to_string()),
-        ];
+        let mut headers = HashMap::new();
+        headers.insert("User-Agent".to_string(), vec!["Mozilla/5.0".to_string()]);
+        headers.insert("Content-Type".to_string(), vec!["application/json".to_string()]);
 
         // Clean request
         let detections = engine.check_request("/api/users", Some("id=123"), &headers);
