@@ -93,11 +93,15 @@ Add WebSocket frame inspection for detecting attacks in WebSocket traffic.
 
 ## Non-Goals
 
-These are explicitly out of scope:
+These are explicitly out of scope for this agent:
 
-- **Full OWASP CRS compatibility** - We implement a useful subset, not the full ruleset
-- **ModSecurity rule language** - We use native Rust regex, not SecLang
+- **Full OWASP CRS compatibility** - We implement a useful subset (~20 rules), not the full 800+ ruleset. For full CRS, see [sentinel-agent-modsec](https://github.com/raskell-io/sentinel-agent-modsec)
+- **ModSecurity rule language (SecLang)** - We use native Rust regex patterns, not SecLang. For SecLang support, see [sentinel-agent-modsec](https://github.com/raskell-io/sentinel-agent-modsec)
 - **Learning mode / ML-based detection** - Keep it simple and deterministic
+
+## Related Projects
+
+- **[sentinel-agent-modsec](https://github.com/raskell-io/sentinel-agent-modsec)** - Full OWASP CRS WAF agent using libmodsecurity bindings. Use this when you need comprehensive protection with 800+ rules or existing SecLang rules.
 
 ---
 

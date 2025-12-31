@@ -1,6 +1,8 @@
 # sentinel-agent-waf
 
-Web Application Firewall agent for [Sentinel](https://github.com/raskell-io/sentinel) reverse proxy. Detects and blocks common web attacks.
+A lightweight Web Application Firewall agent for [Sentinel](https://github.com/raskell-io/sentinel) reverse proxy. Detects and blocks common web attacks using **native Rust regex patterns** - no external dependencies on libmodsecurity or other C libraries.
+
+> **Note:** This agent implements a curated subset of detection rules inspired by OWASP CRS rule IDs, but does **not** use libmodsecurity or the full CRS ruleset. For full OWASP CRS compatibility, see [sentinel-agent-modsec](https://github.com/raskell-io/sentinel-agent-modsec) which wraps libmodsecurity.
 
 ## Features
 
@@ -64,6 +66,8 @@ sentinel-waf-agent --socket /var/run/sentinel/waf.sock --paranoia-level 1
 | 4 | Maximum sensitivity, expect false positives |
 
 ## Detection Rules
+
+Detection rules are implemented as native Rust regex patterns. Rule IDs follow OWASP CRS numbering conventions for familiarity, but the patterns are hand-written and optimized for performance - they are **not** imported from ModSecurity/CRS.
 
 ### SQL Injection (942xxx)
 - UNION-based injection
@@ -153,21 +157,32 @@ sentinel-waf-agent --exclude-paths "/health,/metrics,/static"
 
 ## Comparison with ModSecurity
 
-This agent provides a subset of ModSecurity's OWASP CRS functionality:
+This agent provides a lightweight alternative to ModSecurity with a subset of OWASP CRS-style detection:
 
-| Feature | This Agent | ModSecurity |
-|---------|------------|-------------|
+| Feature | sentinel-agent-waf | sentinel-agent-modsec |
+|---------|-------------------|----------------------|
 | SQL Injection | ✓ | ✓ |
 | XSS | ✓ | ✓ |
 | Path Traversal | ✓ | ✓ |
 | Command Injection | ✓ | ✓ |
-| Full CRS Ruleset | Partial | ✓ |
-| Body Inspection | ✓ | ✓ |
+| Full CRS Ruleset | ~20 rules | 800+ rules |
+| SecLang Support | - | ✓ |
 | Custom Rules | - | ✓ |
-| Dependencies | Pure Rust | libmodsecurity |
-| Installation | `cargo install` | Complex |
+| Body Inspection | ✓ | ✓ |
+| Dependencies | Pure Rust | libmodsecurity (C) |
+| Installation | `cargo install` | Requires libmodsecurity |
+| Binary Size | ~5MB | ~50MB |
+| Memory Usage | Low | Higher |
 
-For full OWASP CRS compatibility, consider using ModSecurity with Sentinel's external processing.
+**When to use this agent:**
+- You want simple, zero-dependency deployment
+- You need low latency and minimal resource usage
+- Basic attack detection is sufficient for your use case
+
+**When to use [sentinel-agent-modsec](https://github.com/raskell-io/sentinel-agent-modsec):**
+- You need full OWASP CRS compatibility
+- You have existing ModSecurity/SecLang rules to migrate
+- You require comprehensive protection with 800+ detection rules
 
 ## Development
 
