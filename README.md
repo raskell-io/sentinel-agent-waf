@@ -9,6 +9,7 @@ Web Application Firewall agent for [Sentinel](https://github.com/raskell-io/sent
 - **Path Traversal** - Directory traversal, encoded attacks
 - **Command Injection** - Shell commands, pipe injection
 - **Protocol Attacks** - Request smuggling, scanner detection
+- **Request Body Inspection** - JSON, form data, and all content types
 - **Paranoia levels** (1-4) for tuning sensitivity
 - **Detect-only mode** for monitoring without blocking
 
@@ -47,6 +48,8 @@ sentinel-waf-agent --socket /var/run/sentinel/waf.sock --paranoia-level 1
 | `--protocol` | `WAF_PROTOCOL` | Enable protocol attack detection | `true` |
 | `--block-mode` | `WAF_BLOCK_MODE` | Block (true) or detect-only (false) | `true` |
 | `--exclude-paths` | `WAF_EXCLUDE_PATHS` | Paths to exclude (comma-separated) | - |
+| `--body-inspection` | `WAF_BODY_INSPECTION` | Enable request body inspection | `true` |
+| `--max-body-size` | `WAF_MAX_BODY_SIZE` | Maximum body size to inspect (bytes) | `1048576` (1MB) |
 | `--verbose` | `WAF_VERBOSE` | Enable debug logging | `false` |
 
 ## Paranoia Levels
@@ -98,7 +101,7 @@ agents {
         transport "unix_socket" {
             path "/var/run/sentinel/waf.sock"
         }
-        events ["request_headers"]
+        events ["request_headers", "request_body_chunk"]
         timeout-ms 50
         failure-mode "open"
     }
@@ -157,7 +160,7 @@ This agent provides a subset of ModSecurity's OWASP CRS functionality:
 | Path Traversal | ✓ | ✓ |
 | Command Injection | ✓ | ✓ |
 | Full CRS Ruleset | Partial | ✓ |
-| Body Inspection | - | ✓ |
+| Body Inspection | ✓ | ✓ |
 | Custom Rules | - | ✓ |
 | Dependencies | Pure Rust | libmodsecurity |
 | Installation | `cargo install` | Complex |

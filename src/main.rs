@@ -4,15 +4,18 @@
 //! common web attacks including SQL injection, XSS, path traversal, and more.
 
 use anyhow::Result;
+use base64::Engine;
 use clap::Parser;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
 use sentinel_agent_protocol::{
-    AgentHandler, AgentResponse, AgentServer, AuditMetadata, HeaderOp,
+    AgentHandler, AgentResponse, AgentServer, AuditMetadata, HeaderOp, RequestBodyChunkEvent,
     RequestHeadersEvent, ResponseHeadersEvent,
 };
 
@@ -56,6 +59,14 @@ struct Args {
     /// Paths to exclude from WAF (comma-separated)
     #[arg(long, env = "WAF_EXCLUDE_PATHS")]
     exclude_paths: Option<String>,
+
+    /// Enable request body inspection
+    #[arg(long, default_value = "true", env = "WAF_BODY_INSPECTION")]
+    body_inspection: bool,
+
+    /// Maximum body size to inspect in bytes (default 1MB)
+    #[arg(long, default_value = "1048576", env = "WAF_MAX_BODY_SIZE")]
+    max_body_size: usize,
 
     /// Enable verbose logging
     #[arg(short, long, env = "WAF_VERBOSE")]
@@ -120,6 +131,8 @@ pub struct WafConfig {
     pub protocol_enabled: bool,
     pub block_mode: bool,
     pub exclude_paths: Vec<String>,
+    pub body_inspection_enabled: bool,
+    pub max_body_size: usize,
 }
 
 impl WafConfig {
@@ -139,6 +152,8 @@ impl WafConfig {
             protocol_enabled: args.protocol,
             block_mode: args.block_mode,
             exclude_paths,
+            body_inspection_enabled: args.body_inspection,
+            max_body_size: args.max_body_size,
         }
     }
 }
@@ -198,7 +213,9 @@ impl WafEngine {
                 id: 942100,
                 name: "SQL Injection Attack Detected via libinjection".to_string(),
                 attack_type: AttackType::SqlInjection,
-                pattern: Regex::new(r"(?i)(\bUNION\b.*\bSELECT\b|\bSELECT\b.*\bFROM\b.*\bWHERE\b)")?,
+                pattern: Regex::new(
+                    r"(?i)(\bUNION\b.*\bSELECT\b|\bSELECT\b.*\bFROM\b.*\bWHERE\b)",
+                )?,
                 paranoia_level: 1,
                 description: "Detects UNION-based SQL injection".to_string(),
             },
@@ -214,7 +231,9 @@ impl WafEngine {
                 id: 942120,
                 name: "SQL Injection Attack: SQL Operator Detected".to_string(),
                 attack_type: AttackType::SqlInjection,
-                pattern: Regex::new(r#"(?i)(\bOR\b\s+['"]?\d+['"]?\s*=\s*['"]?\d+|\bAND\b\s+['"]?\d+['"]?\s*=\s*['"]?\d+)"#)?,
+                pattern: Regex::new(
+                    r#"(?i)(\bOR\b\s+['"]?\d+['"]?\s*=\s*['"]?\d+|\bAND\b\s+['"]?\d+['"]?\s*=\s*['"]?\d+)"#,
+                )?,
                 paranoia_level: 1,
                 description: "Detects OR/AND-based SQL injection".to_string(),
             },
@@ -259,7 +278,10 @@ impl WafEngine {
             });
         }
 
-        Ok(rules.into_iter().filter(|r| r.paranoia_level <= paranoia_level).collect())
+        Ok(rules
+            .into_iter()
+            .filter(|r| r.paranoia_level <= paranoia_level)
+            .collect())
     }
 
     fn xss_rules(paranoia_level: u8) -> Result<Vec<Rule>> {
@@ -284,7 +306,9 @@ impl WafEngine {
                 id: 941120,
                 name: "XSS Filter - Category 2: Event Handler Vector".to_string(),
                 attack_type: AttackType::Xss,
-                pattern: Regex::new(r"(?i)(onerror|onload|onclick|onmouseover|onfocus|onblur)\s*=")?,
+                pattern: Regex::new(
+                    r"(?i)(onerror|onload|onclick|onmouseover|onfocus|onblur)\s*=",
+                )?,
                 paranoia_level: 1,
                 description: "Detects event handler XSS".to_string(),
             },
@@ -317,7 +341,10 @@ impl WafEngine {
             });
         }
 
-        Ok(rules.into_iter().filter(|r| r.paranoia_level <= paranoia_level).collect())
+        Ok(rules
+            .into_iter()
+            .filter(|r| r.paranoia_level <= paranoia_level)
+            .collect())
     }
 
     fn path_traversal_rules(paranoia_level: u8) -> Result<Vec<Rule>> {
@@ -348,7 +375,10 @@ impl WafEngine {
             },
         ];
 
-        Ok(rules.into_iter().filter(|r| r.paranoia_level <= paranoia_level).collect())
+        Ok(rules
+            .into_iter()
+            .filter(|r| r.paranoia_level <= paranoia_level)
+            .collect())
     }
 
     fn command_injection_rules(paranoia_level: u8) -> Result<Vec<Rule>> {
@@ -379,7 +409,10 @@ impl WafEngine {
             },
         ];
 
-        Ok(rules.into_iter().filter(|r| r.paranoia_level <= paranoia_level).collect())
+        Ok(rules
+            .into_iter()
+            .filter(|r| r.paranoia_level <= paranoia_level)
+            .collect())
     }
 
     fn protocol_rules(paranoia_level: u8) -> Result<Vec<Rule>> {
@@ -410,7 +443,10 @@ impl WafEngine {
             },
         ];
 
-        Ok(rules.into_iter().filter(|r| r.paranoia_level <= paranoia_level).collect())
+        Ok(rules
+            .into_iter()
+            .filter(|r| r.paranoia_level <= paranoia_level)
+            .collect())
     }
 
     /// Check a value against all rules
@@ -419,7 +455,11 @@ impl WafEngine {
 
         for rule in &self.rules {
             if rule.pattern.is_match(value) {
-                let matched = rule.pattern.find(value).map(|m| m.as_str().to_string()).unwrap_or_default();
+                let matched = rule
+                    .pattern
+                    .find(value)
+                    .map(|m| m.as_str().to_string())
+                    .unwrap_or_default();
                 detections.push(Detection {
                     rule_id: rule.id,
                     rule_name: rule.name.clone(),
@@ -434,7 +474,12 @@ impl WafEngine {
     }
 
     /// Check entire request
-    pub fn check_request(&self, path: &str, query: Option<&str>, headers: &HashMap<String, Vec<String>>) -> Vec<Detection> {
+    pub fn check_request(
+        &self,
+        path: &str,
+        query: Option<&str>,
+        headers: &HashMap<String, Vec<String>>,
+    ) -> Vec<Detection> {
         let mut all_detections = Vec::new();
 
         // Check path
@@ -458,19 +503,32 @@ impl WafEngine {
 
     /// Check if path should be excluded
     pub fn is_excluded(&self, path: &str) -> bool {
-        self.config.exclude_paths.iter().any(|p| path.starts_with(p))
+        self.config
+            .exclude_paths
+            .iter()
+            .any(|p| path.starts_with(p))
     }
+}
+
+/// Body accumulator for tracking in-progress request bodies
+#[derive(Debug, Default)]
+struct BodyAccumulator {
+    data: Vec<u8>,
 }
 
 /// WAF agent
 pub struct WafAgent {
     engine: WafEngine,
+    pending_bodies: Arc<RwLock<HashMap<String, BodyAccumulator>>>,
 }
 
 impl WafAgent {
     pub fn new(config: WafConfig) -> Result<Self> {
         let engine = WafEngine::new(config)?;
-        Ok(Self { engine })
+        Ok(Self {
+            engine,
+            pending_bodies: Arc::new(RwLock::new(HashMap::new())),
+        })
     }
 }
 
@@ -486,7 +544,10 @@ impl AgentHandler for WafAgent {
         }
 
         // Extract query string from path
-        let (path_only, query) = path.split_once('?').map(|(p, q)| (p, Some(q))).unwrap_or((path, None));
+        let (path_only, query) = path
+            .split_once('?')
+            .map(|(p, q)| (p, Some(q)))
+            .unwrap_or((path, None));
 
         // Check request
         let detections = self.engine.check_request(path_only, query, &event.headers);
@@ -551,6 +612,118 @@ impl AgentHandler for WafAgent {
     async fn on_response_headers(&self, _event: ResponseHeadersEvent) -> AgentResponse {
         AgentResponse::default_allow()
     }
+
+    async fn on_request_body_chunk(&self, event: RequestBodyChunkEvent) -> AgentResponse {
+        // Skip if body inspection is disabled
+        if !self.engine.config.body_inspection_enabled {
+            return AgentResponse::default_allow();
+        }
+
+        // Decode base64 chunk
+        let chunk = match base64::engine::general_purpose::STANDARD.decode(&event.data) {
+            Ok(data) => data,
+            Err(e) => {
+                warn!(error = %e, "Failed to decode body chunk");
+                return AgentResponse::default_allow();
+            }
+        };
+
+        // Accumulate chunk
+        let mut pending = self.pending_bodies.write().await;
+        let accumulator = pending
+            .entry(event.correlation_id.clone())
+            .or_insert_with(BodyAccumulator::default);
+
+        // Check size limit before accumulating
+        if accumulator.data.len() + chunk.len() > self.engine.config.max_body_size {
+            debug!(
+                correlation_id = %event.correlation_id,
+                current_size = accumulator.data.len(),
+                chunk_size = chunk.len(),
+                max_size = self.engine.config.max_body_size,
+                "Body exceeds max size, skipping inspection"
+            );
+            pending.remove(&event.correlation_id);
+            return AgentResponse::default_allow();
+        }
+
+        accumulator.data.extend(chunk);
+
+        // If this is the last chunk, inspect the full body
+        if event.is_last {
+            let body_data = pending.remove(&event.correlation_id).unwrap();
+            let body_str = String::from_utf8_lossy(&body_data.data);
+
+            debug!(
+                correlation_id = %event.correlation_id,
+                body_size = body_data.data.len(),
+                "Inspecting request body"
+            );
+
+            let detections = self.engine.check(&body_str, "body");
+
+            if detections.is_empty() {
+                return AgentResponse::default_allow();
+            }
+
+            // Log detections
+            for detection in &detections {
+                warn!(
+                    rule_id = detection.rule_id,
+                    rule_name = %detection.rule_name,
+                    attack_type = %detection.attack_type,
+                    location = %detection.location,
+                    matched = %detection.matched_value,
+                    "WAF detection in body"
+                );
+            }
+
+            let rule_ids: Vec<String> = detections.iter().map(|d| d.rule_id.to_string()).collect();
+
+            if self.engine.config.block_mode {
+                info!(
+                    detections = detections.len(),
+                    first_rule = detections.first().map(|d| d.rule_id).unwrap_or(0),
+                    "Request blocked by WAF (body inspection)"
+                );
+                return AgentResponse::block(403, Some("Forbidden".to_string()))
+                    .add_response_header(HeaderOp::Set {
+                        name: "X-WAF-Blocked".to_string(),
+                        value: "true".to_string(),
+                    })
+                    .add_response_header(HeaderOp::Set {
+                        name: "X-WAF-Rule".to_string(),
+                        value: rule_ids.first().cloned().unwrap_or_default(),
+                    })
+                    .with_audit(AuditMetadata {
+                        tags: vec!["waf".to_string(), "blocked".to_string(), "body".to_string()],
+                        rule_ids: rule_ids.clone(),
+                        ..Default::default()
+                    });
+            } else {
+                info!(
+                    detections = detections.len(),
+                    "WAF detections in body (detect-only mode)"
+                );
+                return AgentResponse::default_allow()
+                    .add_request_header(HeaderOp::Set {
+                        name: "X-WAF-Detected".to_string(),
+                        value: rule_ids.join(","),
+                    })
+                    .with_audit(AuditMetadata {
+                        tags: vec![
+                            "waf".to_string(),
+                            "detected".to_string(),
+                            "body".to_string(),
+                        ],
+                        rule_ids,
+                        ..Default::default()
+                    });
+            }
+        }
+
+        AgentResponse::default_allow()
+    }
 }
 
 #[tokio::main]
@@ -561,7 +734,11 @@ async fn main() -> Result<()> {
     // Initialize tracing
     let log_level = if args.verbose { "debug" } else { "info" };
     tracing_subscriber::fmt()
-        .with_env_filter(format!("{}={},sentinel_agent_protocol=info", env!("CARGO_CRATE_NAME"), log_level))
+        .with_env_filter(format!(
+            "{}={},sentinel_agent_protocol=info",
+            env!("CARGO_CRATE_NAME"),
+            log_level
+        ))
         .json()
         .init();
 
@@ -577,6 +754,8 @@ async fn main() -> Result<()> {
         path_traversal = config.path_traversal_enabled,
         command_injection = config.command_injection_enabled,
         block_mode = config.block_mode,
+        body_inspection = config.body_inspection_enabled,
+        max_body_size = config.max_body_size,
         "Configuration loaded"
     );
 
@@ -585,11 +764,7 @@ async fn main() -> Result<()> {
 
     // Start agent server
     info!(socket = ?args.socket, "Starting agent server");
-    let server = AgentServer::new(
-        "sentinel-waf-agent",
-        args.socket,
-        Box::new(agent),
-    );
+    let server = AgentServer::new("sentinel-waf-agent", args.socket, Box::new(agent));
     server.run().await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
     Ok(())
@@ -609,6 +784,8 @@ mod tests {
             protocol_enabled: true,
             block_mode: true,
             exclude_paths: vec!["/health".to_string()],
+            body_inspection_enabled: true,
+            max_body_size: 1048576, // 1MB
         };
         WafEngine::new(config).unwrap()
     }
@@ -702,7 +879,10 @@ mod tests {
 
         let mut headers = HashMap::new();
         headers.insert("User-Agent".to_string(), vec!["Mozilla/5.0".to_string()]);
-        headers.insert("Content-Type".to_string(), vec!["application/json".to_string()]);
+        headers.insert(
+            "Content-Type".to_string(),
+            vec!["application/json".to_string()],
+        );
 
         // Clean request
         let detections = engine.check_request("/api/users", Some("id=123"), &headers);
@@ -711,5 +891,94 @@ mod tests {
         // Malicious query
         let detections = engine.check_request("/api/users", Some("id=1' OR '1'='1"), &headers);
         assert!(!detections.is_empty());
+    }
+
+    #[test]
+    fn test_body_sqli_detection() {
+        let engine = test_engine();
+
+        // JSON body with SQL injection
+        let body = r#"{"username": "admin", "password": "' OR '1'='1"}"#;
+        let detections = engine.check(body, "body");
+        assert!(!detections.is_empty());
+        assert_eq!(detections[0].attack_type, AttackType::SqlInjection);
+
+        // Form data with SQL injection
+        let body = "username=admin&password=' OR '1'='1";
+        let detections = engine.check(body, "body");
+        assert!(!detections.is_empty());
+
+        // Clean body
+        let body = r#"{"username": "john", "email": "john@example.com"}"#;
+        let detections = engine.check(body, "body");
+        assert!(detections.is_empty());
+    }
+
+    #[test]
+    fn test_body_xss_detection() {
+        let engine = test_engine();
+
+        // JSON body with XSS
+        let body = r#"{"comment": "<script>alert('xss')</script>"}"#;
+        let detections = engine.check(body, "body");
+        assert!(!detections.is_empty());
+        assert_eq!(detections[0].attack_type, AttackType::Xss);
+
+        // Form data with XSS
+        let body = "comment=<script>alert(1)</script>";
+        let detections = engine.check(body, "body");
+        assert!(!detections.is_empty());
+
+        // Clean body
+        let body = r#"{"comment": "This is a normal comment"}"#;
+        let detections = engine.check(body, "body");
+        assert!(detections.is_empty());
+    }
+
+    #[test]
+    fn test_body_command_injection_detection() {
+        let engine = test_engine();
+
+        // JSON body with command injection using backticks
+        let body = r#"{"filename": "`whoami`"}"#;
+        let detections = engine.check(body, "body");
+        assert!(!detections.is_empty());
+        assert_eq!(detections[0].attack_type, AttackType::CommandInjection);
+
+        // JSON body with command injection using $()
+        let body = r#"{"cmd": "$(cat /etc/passwd)"}"#;
+        let detections = engine.check(body, "body");
+        assert!(!detections.is_empty());
+        assert!(detections
+            .iter()
+            .any(|d| d.attack_type == AttackType::CommandInjection));
+
+        // Clean body
+        let body = r#"{"filename": "document.pdf"}"#;
+        let detections = engine.check(body, "body");
+        assert!(detections.is_empty());
+    }
+
+    #[test]
+    fn test_body_inspection_config() {
+        // Test with body inspection disabled
+        let config = WafConfig {
+            paranoia_level: 2,
+            sqli_enabled: true,
+            xss_enabled: true,
+            path_traversal_enabled: true,
+            command_injection_enabled: true,
+            protocol_enabled: true,
+            block_mode: true,
+            exclude_paths: vec![],
+            body_inspection_enabled: false,
+            max_body_size: 1024,
+        };
+        let engine = WafEngine::new(config).unwrap();
+
+        // Engine still works for checking, the disabled flag is used by WafAgent
+        let body = r#"{"password": "' OR '1'='1"}"#;
+        let detections = engine.check(body, "body");
+        assert!(!detections.is_empty()); // Engine still detects, agent would skip
     }
 }
