@@ -8,6 +8,7 @@ The WAF agent is functional for **request inspection in buffer mode**. It correc
 
 - Request header inspection (path, query string, all headers)
 - Request body inspection (JSON, form data, all content types)
+- Response body inspection (reflected XSS, error leakage detection)
 - SQL injection, XSS, path traversal, command injection detection
 - Paranoia levels 1-4 for tuning sensitivity
 - Block mode and detect-only mode
@@ -16,7 +17,6 @@ The WAF agent is functional for **request inspection in buffer mode**. It correc
 
 ### What Doesn't Work
 
-- Response body inspection
 - Streaming mode (always buffers full body)
 - WebSocket frame inspection
 - Progressive/incremental decisions on large bodies
@@ -26,16 +26,16 @@ The WAF agent is functional for **request inspection in buffer mode**. It correc
 
 ## Roadmap
 
-### v0.2.0 - Response Inspection
+### v0.2.0 - Response Inspection ✓
 
-**Priority: High**
+**Status: Complete**
 
-Add response body inspection to detect attacks in server responses (e.g., reflected XSS, error message leakage).
+Added response body inspection to detect attacks in server responses (e.g., reflected XSS, error message leakage).
 
-- [ ] Implement `on_response_body_chunk()` handler
-- [ ] Add `--response-inspection` flag (default: false for backward compat)
-- [ ] Add response-specific detection rules
-- [ ] Add tests for response body inspection
+- [x] Implement `on_response_body_chunk()` handler
+- [x] Add `--response-inspection` flag (default: false for backward compat)
+- [x] Reuse existing detection rules for response bodies
+- [x] Add tests for response body inspection
 
 ### v0.3.0 - Streaming Mode Support
 

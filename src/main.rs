@@ -16,7 +16,7 @@ use tracing::{debug, info, warn};
 
 use sentinel_agent_protocol::{
     AgentHandler, AgentResponse, AgentServer, AuditMetadata, HeaderOp, RequestBodyChunkEvent,
-    RequestHeadersEvent, ResponseHeadersEvent,
+    RequestHeadersEvent, ResponseBodyChunkEvent, ResponseHeadersEvent,
 };
 
 /// Command line arguments
@@ -67,6 +67,10 @@ struct Args {
     /// Maximum body size to inspect in bytes (default 1MB)
     #[arg(long, default_value = "1048576", env = "WAF_MAX_BODY_SIZE")]
     max_body_size: usize,
+
+    /// Enable response body inspection (detect attacks in server responses)
+    #[arg(long, default_value = "false", env = "WAF_RESPONSE_INSPECTION")]
+    response_inspection: bool,
 
     /// Enable verbose logging
     #[arg(short, long, env = "WAF_VERBOSE")]
@@ -133,6 +137,7 @@ pub struct WafConfig {
     pub exclude_paths: Vec<String>,
     pub body_inspection_enabled: bool,
     pub max_body_size: usize,
+    pub response_inspection_enabled: bool,
 }
 
 impl WafConfig {
@@ -154,6 +159,7 @@ impl WafConfig {
             exclude_paths,
             body_inspection_enabled: args.body_inspection,
             max_body_size: args.max_body_size,
+            response_inspection_enabled: args.response_inspection,
         }
     }
 }
@@ -510,7 +516,7 @@ impl WafEngine {
     }
 }
 
-/// Body accumulator for tracking in-progress request bodies
+/// Body accumulator for tracking in-progress bodies
 #[derive(Debug, Default)]
 struct BodyAccumulator {
     data: Vec<u8>,
@@ -519,7 +525,8 @@ struct BodyAccumulator {
 /// WAF agent
 pub struct WafAgent {
     engine: WafEngine,
-    pending_bodies: Arc<RwLock<HashMap<String, BodyAccumulator>>>,
+    pending_request_bodies: Arc<RwLock<HashMap<String, BodyAccumulator>>>,
+    pending_response_bodies: Arc<RwLock<HashMap<String, BodyAccumulator>>>,
 }
 
 impl WafAgent {
@@ -527,7 +534,8 @@ impl WafAgent {
         let engine = WafEngine::new(config)?;
         Ok(Self {
             engine,
-            pending_bodies: Arc::new(RwLock::new(HashMap::new())),
+            pending_request_bodies: Arc::new(RwLock::new(HashMap::new())),
+            pending_response_bodies: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 }
@@ -629,7 +637,7 @@ impl AgentHandler for WafAgent {
         };
 
         // Accumulate chunk
-        let mut pending = self.pending_bodies.write().await;
+        let mut pending = self.pending_request_bodies.write().await;
         let accumulator = pending
             .entry(event.correlation_id.clone())
             .or_insert_with(BodyAccumulator::default);
@@ -724,6 +732,101 @@ impl AgentHandler for WafAgent {
 
         AgentResponse::default_allow()
     }
+
+    async fn on_response_body_chunk(&self, event: ResponseBodyChunkEvent) -> AgentResponse {
+        // Skip if response inspection is disabled
+        if !self.engine.config.response_inspection_enabled {
+            return AgentResponse::default_allow();
+        }
+
+        // Decode base64 chunk
+        let chunk = match base64::engine::general_purpose::STANDARD.decode(&event.data) {
+            Ok(data) => data,
+            Err(e) => {
+                warn!(error = %e, "Failed to decode response body chunk");
+                return AgentResponse::default_allow();
+            }
+        };
+
+        // Accumulate chunk
+        let mut pending = self.pending_response_bodies.write().await;
+        let accumulator = pending
+            .entry(event.correlation_id.clone())
+            .or_insert_with(BodyAccumulator::default);
+
+        // Check size limit before accumulating
+        if accumulator.data.len() + chunk.len() > self.engine.config.max_body_size {
+            debug!(
+                correlation_id = %event.correlation_id,
+                current_size = accumulator.data.len(),
+                chunk_size = chunk.len(),
+                max_size = self.engine.config.max_body_size,
+                "Response body exceeds max size, skipping inspection"
+            );
+            pending.remove(&event.correlation_id);
+            return AgentResponse::default_allow();
+        }
+
+        accumulator.data.extend(chunk);
+
+        // If this is the last chunk, inspect the full body
+        if event.is_last {
+            let body_data = pending.remove(&event.correlation_id).unwrap();
+            let body_str = String::from_utf8_lossy(&body_data.data);
+
+            debug!(
+                correlation_id = %event.correlation_id,
+                body_size = body_data.data.len(),
+                "Inspecting response body"
+            );
+
+            let detections = self.engine.check(&body_str, "response_body");
+
+            if detections.is_empty() {
+                return AgentResponse::default_allow();
+            }
+
+            // Log detections
+            for detection in &detections {
+                warn!(
+                    rule_id = detection.rule_id,
+                    rule_name = %detection.rule_name,
+                    attack_type = %detection.attack_type,
+                    location = %detection.location,
+                    matched = %detection.matched_value,
+                    "WAF detection in response body"
+                );
+            }
+
+            let rule_ids: Vec<String> = detections.iter().map(|d| d.rule_id.to_string()).collect();
+
+            // For response bodies, we can only log/audit - blocking would require
+            // dropping the response which may not be desirable. We add headers to
+            // indicate detection.
+            info!(
+                detections = detections.len(),
+                first_rule = detections.first().map(|d| d.rule_id).unwrap_or(0),
+                "WAF detection in response (logged)"
+            );
+
+            return AgentResponse::default_allow()
+                .add_response_header(HeaderOp::Set {
+                    name: "X-WAF-Response-Detected".to_string(),
+                    value: rule_ids.join(","),
+                })
+                .with_audit(AuditMetadata {
+                    tags: vec![
+                        "waf".to_string(),
+                        "detected".to_string(),
+                        "response_body".to_string(),
+                    ],
+                    rule_ids,
+                    ..Default::default()
+                });
+        }
+
+        AgentResponse::default_allow()
+    }
 }
 
 #[tokio::main]
@@ -755,6 +858,7 @@ async fn main() -> Result<()> {
         command_injection = config.command_injection_enabled,
         block_mode = config.block_mode,
         body_inspection = config.body_inspection_enabled,
+        response_inspection = config.response_inspection_enabled,
         max_body_size = config.max_body_size,
         "Configuration loaded"
     );
@@ -786,6 +890,7 @@ mod tests {
             exclude_paths: vec!["/health".to_string()],
             body_inspection_enabled: true,
             max_body_size: 1048576, // 1MB
+            response_inspection_enabled: true,
         };
         WafEngine::new(config).unwrap()
     }
@@ -973,6 +1078,7 @@ mod tests {
             exclude_paths: vec![],
             body_inspection_enabled: false,
             max_body_size: 1024,
+            response_inspection_enabled: false,
         };
         let engine = WafEngine::new(config).unwrap();
 
@@ -980,5 +1086,43 @@ mod tests {
         let body = r#"{"password": "' OR '1'='1"}"#;
         let detections = engine.check(body, "body");
         assert!(!detections.is_empty()); // Engine still detects, agent would skip
+    }
+
+    #[test]
+    fn test_response_body_xss_detection() {
+        let engine = test_engine();
+
+        // Response containing reflected XSS
+        let response = r#"<html><body>Welcome <script>alert('xss')</script></body></html>"#;
+        let detections = engine.check(response, "response_body");
+        assert!(!detections.is_empty());
+        assert_eq!(detections[0].attack_type, AttackType::Xss);
+
+        // Response with event handler XSS
+        let response = r#"<div onclick=alert(1)>Click me</div>"#;
+        let detections = engine.check(response, "response_body");
+        assert!(!detections.is_empty());
+        assert_eq!(detections[0].attack_type, AttackType::Xss);
+
+        // Clean response
+        let response = r#"{"status": "ok", "message": "User created successfully"}"#;
+        let detections = engine.check(response, "response_body");
+        assert!(detections.is_empty());
+    }
+
+    #[test]
+    fn test_response_body_error_leakage() {
+        let engine = test_engine();
+
+        // Response leaking path traversal in error
+        let response = "File not found: /etc/passwd";
+        let detections = engine.check(response, "response_body");
+        assert!(!detections.is_empty());
+        assert_eq!(detections[0].attack_type, AttackType::PathTraversal);
+
+        // Response leaking command output
+        let response = "Error executing: /bin/bash -c 'whoami'";
+        let detections = engine.check(response, "response_body");
+        assert!(!detections.is_empty());
     }
 }

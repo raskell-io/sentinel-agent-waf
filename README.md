@@ -10,6 +10,7 @@ Web Application Firewall agent for [Sentinel](https://github.com/raskell-io/sent
 - **Command Injection** - Shell commands, pipe injection
 - **Protocol Attacks** - Request smuggling, scanner detection
 - **Request Body Inspection** - JSON, form data, and all content types
+- **Response Body Inspection** - Detect reflected XSS, error leakage (opt-in)
 - **Paranoia levels** (1-4) for tuning sensitivity
 - **Detect-only mode** for monitoring without blocking
 
@@ -50,6 +51,7 @@ sentinel-waf-agent --socket /var/run/sentinel/waf.sock --paranoia-level 1
 | `--exclude-paths` | `WAF_EXCLUDE_PATHS` | Paths to exclude (comma-separated) | - |
 | `--body-inspection` | `WAF_BODY_INSPECTION` | Enable request body inspection | `true` |
 | `--max-body-size` | `WAF_MAX_BODY_SIZE` | Maximum body size to inspect (bytes) | `1048576` (1MB) |
+| `--response-inspection` | `WAF_RESPONSE_INSPECTION` | Enable response body inspection | `false` |
 | `--verbose` | `WAF_VERBOSE` | Enable debug logging | `false` |
 
 ## Paranoia Levels
@@ -101,7 +103,7 @@ agents {
         transport "unix_socket" {
             path "/var/run/sentinel/waf.sock"
         }
-        events ["request_headers", "request_body_chunk"]
+        events ["request_headers", "request_body_chunk", "response_body_chunk"]
         timeout-ms 50
         failure-mode "open"
     }
