@@ -13,6 +13,10 @@ keywords = ["proxy", "reverse-proxy", "agent", "waf", "security"]
 categories = ["network-programming"]
 readme = "README.md"
 
+[lib]
+name = "sentinel_agent_waf"
+path = "src/lib.rs"
+
 [[bin]]
 name = "sentinel-waf-agent"
 path = "src/main.rs"
@@ -49,3 +53,4 @@ clap = { version = "4.5", features = ["derive", "env"] }
 
 [dev-dependencies]
 tempfile = "3.12"
+uuid = { version = "1.10", features = ["v4"] }

@@ -51,15 +51,22 @@ Support streaming mode for memory efficiency on large request bodies.
 
 ### v0.4.0 - Integration Tests
 
-**Priority: High**
+**Status: Complete**
 
-Add end-to-end tests with actual Sentinel proxy.
+Added integration tests using the sentinel-agent-protocol's AgentClient/AgentServer for end-to-end testing without requiring a full Sentinel proxy deployment.
 
-- [ ] Create integration test harness with Sentinel proxy
-- [ ] Test all detection rules against live requests
-- [ ] Test block/allow decisions propagate correctly
-- [ ] Test body streaming modes
-- [ ] Add CI workflow for integration tests
+- [x] Create integration test harness using AgentClient/AgentServer
+- [x] Test SQL injection detection (query string, UNION SELECT, detect-only mode)
+- [x] Test XSS detection (script tags, event handlers, JavaScript URIs, headers)
+- [x] Test path traversal detection (plain and URL-encoded)
+- [x] Test command injection detection (backticks, pipes)
+- [x] Test path exclusion functionality
+- [x] Test request body inspection (single chunk, chunked, size limits)
+- [x] Test response body inspection
+- [x] Test scanner detection
+- [x] Test paranoia levels (level 1 vs level 2)
+- [x] Test clean requests pass through
+- [ ] Add CI workflow for integration tests (future)
 
 ### v0.5.0 - WebSocket Support
 
