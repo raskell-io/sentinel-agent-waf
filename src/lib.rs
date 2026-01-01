@@ -25,7 +25,7 @@ use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
 use sentinel_agent_protocol::{
-    AgentHandler, AgentResponse, AuditMetadata, HeaderOp, RequestBodyChunkEvent,
+    AgentHandler, AgentResponse, AuditMetadata, ConfigureEvent, HeaderOp, RequestBodyChunkEvent,
     RequestHeadersEvent, ResponseBodyChunkEvent, ResponseHeadersEvent,
 };
 
@@ -106,6 +106,66 @@ impl Default for WafConfig {
             body_inspection_enabled: true,
             max_body_size: 1048576, // 1MB
             response_inspection_enabled: false,
+        }
+    }
+}
+
+/// JSON-serializable config for Configure events
+///
+/// Uses kebab-case to match KDL naming conventions.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct WafConfigJson {
+    #[serde(default = "default_paranoia")]
+    pub paranoia_level: u8,
+    #[serde(default = "default_true")]
+    pub sqli: bool,
+    #[serde(default = "default_true")]
+    pub xss: bool,
+    #[serde(default = "default_true")]
+    pub path_traversal: bool,
+    #[serde(default = "default_true")]
+    pub command_injection: bool,
+    #[serde(default = "default_true")]
+    pub protocol: bool,
+    #[serde(default = "default_true")]
+    pub block_mode: bool,
+    #[serde(default)]
+    pub exclude_paths: Vec<String>,
+    #[serde(default = "default_true")]
+    pub body_inspection: bool,
+    #[serde(default = "default_max_body")]
+    pub max_body_size: usize,
+    #[serde(default)]
+    pub response_inspection: bool,
+}
+
+fn default_paranoia() -> u8 {
+    1
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_max_body() -> usize {
+    1048576
+}
+
+impl From<WafConfigJson> for WafConfig {
+    fn from(json: WafConfigJson) -> Self {
+        WafConfig {
+            paranoia_level: json.paranoia_level,
+            sqli_enabled: json.sqli,
+            xss_enabled: json.xss,
+            path_traversal_enabled: json.path_traversal,
+            command_injection_enabled: json.command_injection,
+            protocol_enabled: json.protocol,
+            block_mode: json.block_mode,
+            exclude_paths: json.exclude_paths,
+            body_inspection_enabled: json.body_inspection,
+            max_body_size: json.max_body_size,
+            response_inspection_enabled: json.response_inspection,
         }
     }
 }
@@ -470,7 +530,7 @@ struct BodyAccumulator {
 
 /// WAF agent
 pub struct WafAgent {
-    engine: WafEngine,
+    engine: Arc<RwLock<WafEngine>>,
     pending_request_bodies: Arc<RwLock<HashMap<String, BodyAccumulator>>>,
     pending_response_bodies: Arc<RwLock<HashMap<String, BodyAccumulator>>>,
 }
@@ -479,25 +539,64 @@ impl WafAgent {
     pub fn new(config: WafConfig) -> Result<Self> {
         let engine = WafEngine::new(config)?;
         Ok(Self {
-            engine,
+            engine: Arc::new(RwLock::new(engine)),
             pending_request_bodies: Arc::new(RwLock::new(HashMap::new())),
             pending_response_bodies: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 
-    /// Get a reference to the WAF engine (for testing)
-    pub fn engine(&self) -> &WafEngine {
-        &self.engine
+    /// Reconfigure the WAF engine with new settings
+    pub async fn reconfigure(&self, config: WafConfig) -> Result<()> {
+        let new_engine = WafEngine::new(config)?;
+        *self.engine.write().await = new_engine;
+        Ok(())
     }
 }
 
 #[async_trait::async_trait]
 impl AgentHandler for WafAgent {
+    async fn on_configure(&self, event: ConfigureEvent) -> AgentResponse {
+        info!(agent_id = %event.agent_id, "Received configuration");
+        debug!(config = ?event.config, "Configuration content");
+
+        // Parse the JSON config
+        let json_config: WafConfigJson = match serde_json::from_value(event.config) {
+            Ok(c) => c,
+            Err(e) => {
+                warn!(error = %e, "Failed to parse WAF configuration");
+                return AgentResponse::block(500, Some(format!("Invalid WAF config: {}", e)));
+            }
+        };
+
+        // Convert to WafConfig and reconfigure
+        let config: WafConfig = json_config.into();
+        info!(
+            paranoia_level = config.paranoia_level,
+            sqli = config.sqli_enabled,
+            xss = config.xss_enabled,
+            block_mode = config.block_mode,
+            exclude_paths = ?config.exclude_paths,
+            "Applying WAF configuration"
+        );
+
+        match self.reconfigure(config).await {
+            Ok(()) => {
+                info!("WAF agent reconfigured successfully");
+                AgentResponse::default_allow()
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to reconfigure WAF engine");
+                AgentResponse::block(500, Some(format!("Failed to reconfigure: {}", e)))
+            }
+        }
+    }
+
     async fn on_request_headers(&self, event: RequestHeadersEvent) -> AgentResponse {
+        let engine = self.engine.read().await;
         let path = &event.uri;
 
         // Check exclusions
-        if self.engine.is_excluded(path) {
+        if engine.is_excluded(path) {
             debug!(path = path, "Path excluded from WAF");
             return AgentResponse::default_allow();
         }
@@ -509,7 +608,7 @@ impl AgentHandler for WafAgent {
             .unwrap_or((path, None));
 
         // Check request
-        let detections = self.engine.check_request(path_only, query, &event.headers);
+        let detections = engine.check_request(path_only, query, &event.headers);
 
         if detections.is_empty() {
             return AgentResponse::default_allow();
@@ -529,7 +628,7 @@ impl AgentHandler for WafAgent {
 
         let rule_ids: Vec<String> = detections.iter().map(|d| d.rule_id.to_string()).collect();
 
-        if self.engine.config.block_mode {
+        if engine.config.block_mode {
             info!(
                 detections = detections.len(),
                 first_rule = detections.first().map(|d| d.rule_id).unwrap_or(0),
@@ -573,8 +672,10 @@ impl AgentHandler for WafAgent {
     }
 
     async fn on_request_body_chunk(&self, event: RequestBodyChunkEvent) -> AgentResponse {
+        let engine = self.engine.read().await;
+
         // Skip if body inspection is disabled
-        if !self.engine.config.body_inspection_enabled {
+        if !engine.config.body_inspection_enabled {
             return AgentResponse::default_allow();
         }
 
@@ -594,12 +695,12 @@ impl AgentHandler for WafAgent {
             .or_insert_with(BodyAccumulator::default);
 
         // Check size limit before accumulating
-        if accumulator.data.len() + chunk.len() > self.engine.config.max_body_size {
+        if accumulator.data.len() + chunk.len() > engine.config.max_body_size {
             debug!(
                 correlation_id = %event.correlation_id,
                 current_size = accumulator.data.len(),
                 chunk_size = chunk.len(),
-                max_size = self.engine.config.max_body_size,
+                max_size = engine.config.max_body_size,
                 "Body exceeds max size, skipping inspection"
             );
             pending.remove(&event.correlation_id);
@@ -619,7 +720,7 @@ impl AgentHandler for WafAgent {
                 "Inspecting request body"
             );
 
-            let detections = self.engine.check(&body_str, "body");
+            let detections = engine.check(&body_str, "body");
 
             if detections.is_empty() {
                 return AgentResponse::default_allow();
@@ -639,7 +740,7 @@ impl AgentHandler for WafAgent {
 
             let rule_ids: Vec<String> = detections.iter().map(|d| d.rule_id.to_string()).collect();
 
-            if self.engine.config.block_mode {
+            if engine.config.block_mode {
                 info!(
                     detections = detections.len(),
                     first_rule = detections.first().map(|d| d.rule_id).unwrap_or(0),
@@ -685,8 +786,10 @@ impl AgentHandler for WafAgent {
     }
 
     async fn on_response_body_chunk(&self, event: ResponseBodyChunkEvent) -> AgentResponse {
+        let engine = self.engine.read().await;
+
         // Skip if response inspection is disabled
-        if !self.engine.config.response_inspection_enabled {
+        if !engine.config.response_inspection_enabled {
             return AgentResponse::default_allow();
         }
 
@@ -706,12 +809,12 @@ impl AgentHandler for WafAgent {
             .or_insert_with(BodyAccumulator::default);
 
         // Check size limit before accumulating
-        if accumulator.data.len() + chunk.len() > self.engine.config.max_body_size {
+        if accumulator.data.len() + chunk.len() > engine.config.max_body_size {
             debug!(
                 correlation_id = %event.correlation_id,
                 current_size = accumulator.data.len(),
                 chunk_size = chunk.len(),
-                max_size = self.engine.config.max_body_size,
+                max_size = engine.config.max_body_size,
                 "Response body exceeds max size, skipping inspection"
             );
             pending.remove(&event.correlation_id);
@@ -731,7 +834,7 @@ impl AgentHandler for WafAgent {
                 "Inspecting response body"
             );
 
-            let detections = self.engine.check(&body_str, "response_body");
+            let detections = engine.check(&body_str, "response_body");
 
             if detections.is_empty() {
                 return AgentResponse::default_allow();

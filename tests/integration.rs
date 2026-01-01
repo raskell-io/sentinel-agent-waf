@@ -73,6 +73,8 @@ fn make_body_chunk(correlation_id: &str, data: &str, is_last: bool) -> RequestBo
         data: base64::engine::general_purpose::STANDARD.encode(data),
         is_last,
         total_size: None,
+        chunk_index: 0,
+        bytes_received: data.len(),
     }
 }
 
@@ -87,6 +89,8 @@ fn make_response_body_chunk(
         data: base64::engine::general_purpose::STANDARD.encode(data),
         is_last,
         total_size: None,
+        chunk_index: 0,
+        bytes_sent: data.len(),
     }
 }
 
