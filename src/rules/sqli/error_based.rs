@@ -1,0 +1,181 @@
+//! Error-based SQL Injection Rules
+
+use crate::rules::{AttackType, Confidence, Rule, RuleBuilder, Severity};
+use anyhow::Result;
+
+pub fn rules() -> Result<Vec<Rule>> {
+    Ok(vec![
+        // Destructive SQL commands
+        RuleBuilder::new(942120, "SQL Injection: DROP statement")
+            .description("Detects DROP TABLE/DATABASE attempts")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i);\s*DROP\s+(TABLE|DATABASE|INDEX|VIEW)\s+")
+            .base_score(10)
+            .cwe(89)
+            .owasp("A03:2021-Injection")
+            .tags(&["sqli", "sqli-destructive"])
+            .build()?,
+
+        RuleBuilder::new(942121, "SQL Injection: DELETE statement")
+            .description("Detects DELETE FROM attempts")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i);\s*DELETE\s+FROM\s+")
+            .base_score(10)
+            .cwe(89)
+            .tags(&["sqli", "sqli-destructive"])
+            .build()?,
+
+        RuleBuilder::new(942122, "SQL Injection: UPDATE statement")
+            .description("Detects UPDATE SET attempts")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i);\s*UPDATE\s+\w+\s+SET\s+")
+            .base_score(9)
+            .cwe(89)
+            .tags(&["sqli", "sqli-destructive"])
+            .build()?,
+
+        RuleBuilder::new(942123, "SQL Injection: INSERT statement")
+            .description("Detects INSERT INTO attempts")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i);\s*INSERT\s+INTO\s+")
+            .base_score(9)
+            .cwe(89)
+            .tags(&["sqli", "sqli-destructive"])
+            .build()?,
+
+        RuleBuilder::new(942124, "SQL Injection: ALTER statement")
+            .description("Detects ALTER TABLE attempts")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i);\s*ALTER\s+(TABLE|DATABASE)\s+")
+            .base_score(10)
+            .cwe(89)
+            .tags(&["sqli", "sqli-destructive"])
+            .build()?,
+
+        RuleBuilder::new(942125, "SQL Injection: TRUNCATE statement")
+            .description("Detects TRUNCATE TABLE attempts")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i);\s*TRUNCATE\s+(TABLE\s+)?\w+")
+            .base_score(10)
+            .cwe(89)
+            .tags(&["sqli", "sqli-destructive"])
+            .build()?,
+
+        // Error-based extraction
+        RuleBuilder::new(942130, "SQL Injection: EXTRACTVALUE/UPDATEXML")
+            .description("Detects MySQL error-based extraction functions")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)(EXTRACTVALUE|UPDATEXML)\s*\(")
+            .base_score(9)
+            .cwe(89)
+            .tags(&["sqli", "sqli-error", "mysql"])
+            .build()?,
+
+        RuleBuilder::new(942131, "SQL Injection: CONVERT/CAST error")
+            .description("Detects error-based injection via type conversion")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::High)
+            .confidence(Confidence::Medium)
+            .paranoia(2)
+            .pattern(r"(?i)(CONVERT|CAST)\s*\(.+\s+AS\s+(INT|VARCHAR|CHAR)")
+            .base_score(7)
+            .cwe(89)
+            .tags(&["sqli", "sqli-error"])
+            .build()?,
+
+        RuleBuilder::new(942132, "SQL Injection: EXP/FLOOR error overflow")
+            .description("Detects MySQL error-based injection via math overflow")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(2)
+            .pattern(r"(?i)(EXP|FLOOR)\s*\(\s*(RAND|SELECT)")
+            .base_score(8)
+            .cwe(89)
+            .tags(&["sqli", "sqli-error", "mysql"])
+            .build()?,
+
+        RuleBuilder::new(942133, "SQL Injection: XMLType error (Oracle)")
+            .description("Detects Oracle XMLType error-based injection")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(2)
+            .pattern(r"(?i)XMLType\s*\(\s*\(")
+            .base_score(8)
+            .cwe(89)
+            .tags(&["sqli", "sqli-error", "oracle"])
+            .build()?,
+
+        // MSSQL specific
+        RuleBuilder::new(942140, "SQL Injection: xp_cmdshell")
+            .description("Detects MSSQL command execution via xp_cmdshell")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)xp_cmdshell")
+            .base_score(10)
+            .cwe(89)
+            .tags(&["sqli", "sqli-rce", "mssql"])
+            .build()?,
+
+        RuleBuilder::new(942141, "SQL Injection: sp_executesql")
+            .description("Detects MSSQL dynamic SQL execution")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::High)
+            .confidence(Confidence::Medium)
+            .paranoia(2)
+            .pattern(r"(?i)(sp_executesql|EXEC\s*\()")
+            .base_score(7)
+            .cwe(89)
+            .tags(&["sqli", "mssql"])
+            .build()?,
+
+        // PostgreSQL specific
+        RuleBuilder::new(942145, "SQL Injection: PostgreSQL COPY")
+            .description("Detects PostgreSQL file read/write via COPY")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)COPY\s+\w+\s+(FROM|TO)\s+")
+            .base_score(10)
+            .cwe(89)
+            .tags(&["sqli", "sqli-file", "postgresql"])
+            .build()?,
+
+        RuleBuilder::new(942146, "SQL Injection: PostgreSQL lo_export")
+            .description("Detects PostgreSQL large object file operations")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)(lo_export|lo_import)\s*\(")
+            .base_score(10)
+            .cwe(89)
+            .tags(&["sqli", "sqli-file", "postgresql"])
+            .build()?,
+    ])
+}

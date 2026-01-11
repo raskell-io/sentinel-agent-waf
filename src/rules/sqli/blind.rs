@@ -1,0 +1,180 @@
+//! Blind SQL Injection Rules (Boolean and Time-based)
+
+use crate::rules::{AttackType, Confidence, Rule, RuleBuilder, Severity};
+use anyhow::Result;
+
+pub fn rules() -> Result<Vec<Rule>> {
+    Ok(vec![
+        // Boolean-based blind
+        RuleBuilder::new(942150, "SQL Injection: Tautology OR 1=1")
+            .description("Detects classic OR 1=1 tautology injection")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r#"(?i)['"]\s*OR\s*['"]?1['"]?\s*=\s*['"]?1"#)
+            .base_score(9)
+            .cwe(89)
+            .owasp("A03:2021-Injection")
+            .tags(&["sqli", "sqli-blind", "sqli-boolean"])
+            .build()?,
+
+        RuleBuilder::new(942151, "SQL Injection: Tautology OR true")
+            .description("Detects OR true tautology")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r#"(?i)['"]\s*OR\s+(true|'a'\s*=\s*'a')"#)
+            .base_score(9)
+            .cwe(89)
+            .tags(&["sqli", "sqli-blind", "sqli-boolean"])
+            .build()?,
+
+        RuleBuilder::new(942152, "SQL Injection: AND 1=1 test")
+            .description("Detects AND-based boolean blind testing")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::Medium)
+            .confidence(Confidence::Medium)
+            .paranoia(1)
+            .pattern(r#"(?i)\bAND\b\s*['"]?\d+['"]?\s*=\s*['"]?\d+"#)
+            .base_score(7)
+            .cwe(89)
+            .tags(&["sqli", "sqli-blind", "sqli-boolean"])
+            .build()?,
+
+        RuleBuilder::new(942153, "SQL Injection: Boolean substring test")
+            .description("Detects boolean blind via SUBSTRING comparison")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(2)
+            .pattern(r#"(?i)(SUBSTRING|SUBSTR|MID)\s*\(.+\)\s*=\s*['\"]"#)
+            .base_score(8)
+            .cwe(89)
+            .tags(&["sqli", "sqli-blind", "sqli-boolean"])
+            .build()?,
+
+        RuleBuilder::new(942154, "SQL Injection: Boolean ASCII test")
+            .description("Detects boolean blind via ASCII value comparison")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(2)
+            .pattern(r"(?i)(ASCII|ORD)\s*\(.+\)\s*(=|>|<|>=|<=)\s*\d+")
+            .base_score(8)
+            .cwe(89)
+            .tags(&["sqli", "sqli-blind", "sqli-boolean"])
+            .build()?,
+
+        RuleBuilder::new(942155, "SQL Injection: CASE WHEN blind")
+            .description("Detects CASE WHEN conditional blind injection")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(2)
+            .pattern(r"(?i)CASE\s+WHEN\s+.+\s+THEN\s+.+\s+ELSE\s+.+\s+END")
+            .base_score(7)
+            .cwe(89)
+            .tags(&["sqli", "sqli-blind"])
+            .build()?,
+
+        RuleBuilder::new(942156, "SQL Injection: IF condition blind")
+            .description("Detects IF conditional blind injection")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::High)
+            .confidence(Confidence::Medium)
+            .paranoia(2)
+            .pattern(r"(?i)\bIF\s*\(\s*.+,\s*.+,\s*.+\)")
+            .base_score(6)
+            .cwe(89)
+            .tags(&["sqli", "sqli-blind"])
+            .build()?,
+
+        // Time-based blind
+        RuleBuilder::new(942160, "SQL Injection: SLEEP function")
+            .description("Detects MySQL SLEEP-based time injection")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)SLEEP\s*\(\s*\d+")
+            .base_score(9)
+            .cwe(89)
+            .tags(&["sqli", "sqli-blind", "sqli-time", "mysql"])
+            .build()?,
+
+        RuleBuilder::new(942161, "SQL Injection: BENCHMARK function")
+            .description("Detects MySQL BENCHMARK-based time injection")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)BENCHMARK\s*\(\s*\d+")
+            .base_score(9)
+            .cwe(89)
+            .tags(&["sqli", "sqli-blind", "sqli-time", "mysql"])
+            .build()?,
+
+        RuleBuilder::new(942162, "SQL Injection: WAITFOR DELAY")
+            .description("Detects MSSQL WAITFOR DELAY time injection")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)WAITFOR\s+(DELAY|TIME)")
+            .base_score(9)
+            .cwe(89)
+            .tags(&["sqli", "sqli-blind", "sqli-time", "mssql"])
+            .build()?,
+
+        RuleBuilder::new(942163, "SQL Injection: pg_sleep")
+            .description("Detects PostgreSQL pg_sleep time injection")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)pg_sleep\s*\(\s*\d+")
+            .base_score(9)
+            .cwe(89)
+            .tags(&["sqli", "sqli-blind", "sqli-time", "postgresql"])
+            .build()?,
+
+        RuleBuilder::new(942164, "SQL Injection: DBMS_LOCK.SLEEP")
+            .description("Detects Oracle DBMS_LOCK.SLEEP time injection")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)DBMS_LOCK[.]SLEEP")
+            .base_score(9)
+            .cwe(89)
+            .tags(&["sqli", "sqli-blind", "sqli-time", "oracle"])
+            .build()?,
+
+        // Comparison operators
+        RuleBuilder::new(942170, "SQL Injection: Greater/Less comparison")
+            .description("Detects numeric comparison in SQL context")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::Low)
+            .confidence(Confidence::Low)
+            .paranoia(3)
+            .pattern(r#"(?i)['"]?\s*(>|<|>=|<=|<>|!=)\s*['"]?\d+"#)
+            .base_score(3)
+            .cwe(89)
+            .tags(&["sqli", "sqli-blind"])
+            .build()?,
+
+        RuleBuilder::new(942171, "SQL Injection: LIKE pattern")
+            .description("Detects LIKE operator with wildcards")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::Low)
+            .confidence(Confidence::Low)
+            .paranoia(3)
+            .pattern(r#"(?i)\bLIKE\s*['"][%_]"#)
+            .base_score(2)
+            .cwe(89)
+            .tags(&["sqli", "sqli-blind"])
+            .build()?,
+    ])
+}

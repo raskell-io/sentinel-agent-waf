@@ -1,0 +1,144 @@
+//! Union-based SQL Injection Rules
+
+use crate::rules::{AttackType, Confidence, Rule, RuleBuilder, Severity};
+use anyhow::Result;
+
+pub fn rules() -> Result<Vec<Rule>> {
+    Ok(vec![
+        // High confidence UNION-based SQLi
+        RuleBuilder::new(942100, "SQL Injection: UNION SELECT")
+            .description("Detects UNION-based SQL injection with SELECT")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)\bUNION\b.{0,100}\bSELECT\b")
+            .base_score(9)
+            .cwe(89)
+            .owasp("A03:2021-Injection")
+            .tags(&["sqli", "sqli-union", "owasp-top10"])
+            .build()?,
+
+        RuleBuilder::new(942101, "SQL Injection: UNION ALL SELECT")
+            .description("Detects UNION ALL SELECT injection")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)\bUNION\s+ALL\b.{0,100}\bSELECT\b")
+            .base_score(9)
+            .cwe(89)
+            .owasp("A03:2021-Injection")
+            .tags(&["sqli", "sqli-union"])
+            .build()?,
+
+        RuleBuilder::new(942102, "SQL Injection: UNION with column count")
+            .description("Detects UNION with NULL columns for column counting")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)\bUNION\b.{0,50}\bSELECT\b.{0,50}(NULL|1)(,\s*(NULL|1)){2,}")
+            .base_score(9)
+            .cwe(89)
+            .tags(&["sqli", "sqli-union"])
+            .build()?,
+
+        RuleBuilder::new(942103, "SQL Injection: SELECT FROM with WHERE")
+            .description("Detects classic SELECT FROM WHERE pattern")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::High)
+            .confidence(Confidence::Medium)
+            .paranoia(1)
+            .pattern(r"(?i)\bSELECT\b.{1,100}\bFROM\b.{1,100}\bWHERE\b")
+            .base_score(7)
+            .cwe(89)
+            .tags(&["sqli", "sqli-select"])
+            .build()?,
+
+        RuleBuilder::new(942104, "SQL Injection: SELECT with information_schema")
+            .description("Detects database enumeration via information_schema")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)\bSELECT\b.{0,100}(information_schema|mysql\.user|sys\.)")
+            .base_score(10)
+            .cwe(89)
+            .tags(&["sqli", "sqli-enum", "database-enum"])
+            .build()?,
+
+        RuleBuilder::new(942105, "SQL Injection: UNION with ORDER BY")
+            .description("Detects UNION-based injection with ORDER BY for column detection")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::High)
+            .confidence(Confidence::Medium)
+            .paranoia(1)
+            .pattern(r"(?i)(\bUNION\b|\bORDER\s+BY\b)\s+\d+")
+            .base_score(7)
+            .cwe(89)
+            .tags(&["sqli", "sqli-union"])
+            .build()?,
+
+        // Medium confidence patterns
+        RuleBuilder::new(942110, "SQL Injection: SELECT with concat")
+            .description("Detects SELECT with string concatenation")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::Medium)
+            .confidence(Confidence::Medium)
+            .paranoia(2)
+            .pattern(r"(?i)\bSELECT\b.{0,50}(CONCAT|GROUP_CONCAT)\s*\(")
+            .base_score(6)
+            .cwe(89)
+            .tags(&["sqli", "sqli-select"])
+            .build()?,
+
+        RuleBuilder::new(942111, "SQL Injection: UNION with comments")
+            .description("Detects UNION-based injection with inline comments")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::High)
+            .confidence(Confidence::Medium)
+            .paranoia(2)
+            .pattern(r"(?i)\bUNION\b\s*/\*.*\*/\s*\bSELECT\b")
+            .base_score(8)
+            .cwe(89)
+            .tags(&["sqli", "sqli-union", "sqli-evasion"])
+            .build()?,
+
+        RuleBuilder::new(942112, "SQL Injection: Case variation evasion")
+            .description("Detects SQL keywords with unusual case patterns")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::Medium)
+            .confidence(Confidence::Low)
+            .paranoia(3)
+            .pattern(r"(?-i)(uNiOn|UnIoN|sElEcT|SeLeCt|FrOm|WhErE)")
+            .base_score(5)
+            .cwe(89)
+            .tags(&["sqli", "sqli-evasion"])
+            .build()?,
+
+        RuleBuilder::new(942113, "SQL Injection: URL-encoded UNION")
+            .description("Detects URL-encoded UNION SELECT")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(2)
+            .pattern(r"(?i)(%55%4e%49%4f%4e|%75%6e%69%6f%6e)")
+            .base_score(8)
+            .cwe(89)
+            .tags(&["sqli", "sqli-union", "sqli-encoded"])
+            .build()?,
+
+        RuleBuilder::new(942114, "SQL Injection: Double URL-encoded UNION")
+            .description("Detects double URL-encoded SQL injection")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(2)
+            .pattern(r"(?i)(%2555%254e%2549%254f%254e)")
+            .base_score(8)
+            .cwe(89)
+            .tags(&["sqli", "sqli-union", "sqli-encoded"])
+            .build()?,
+    ])
+}

@@ -1,0 +1,132 @@
+//! Stacked Queries SQL Injection Rules
+
+use crate::rules::{AttackType, Confidence, Rule, RuleBuilder, Severity};
+use anyhow::Result;
+
+pub fn rules() -> Result<Vec<Rule>> {
+    Ok(vec![
+        // SQL comment-based injection
+        RuleBuilder::new(942180, "SQL Injection: Comment termination")
+            .description("Detects SQL comment-based injection")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::Medium)
+            .confidence(Confidence::Medium)
+            .paranoia(2)
+            .pattern(r#"(?i)(['"]\s*(-{2}|#|/\*)|(-{2}|#|/\*)\s*['"$])"#)
+            .base_score(6)
+            .cwe(89)
+            .tags(&["sqli", "sqli-comment"])
+            .build()?,
+
+        RuleBuilder::new(942181, "SQL Injection: Inline comment")
+            .description("Detects inline comment injection between keywords")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::Medium)
+            .confidence(Confidence::Low)
+            .paranoia(2)
+            .pattern(r"/\*[^*]*\*/")
+            .base_score(4)
+            .cwe(89)
+            .tags(&["sqli", "sqli-comment"])
+            .build()?,
+
+        RuleBuilder::new(942182, "SQL Injection: MySQL version comment")
+            .description("Detects MySQL version-specific comment injection")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(2)
+            .pattern(r"/\*!\d{5}")
+            .base_score(8)
+            .cwe(89)
+            .tags(&["sqli", "sqli-comment", "mysql"])
+            .build()?,
+
+        // Stacked queries
+        RuleBuilder::new(942185, "SQL Injection: Semicolon stacking")
+            .description("Detects semicolon-separated stacked queries")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::High)
+            .confidence(Confidence::Medium)
+            .paranoia(1)
+            .pattern(r"(?i);\s*(SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE)")
+            .base_score(8)
+            .cwe(89)
+            .tags(&["sqli", "sqli-stacked"])
+            .build()?,
+
+        RuleBuilder::new(942186, "SQL Injection: Multiple statements")
+            .description("Detects multiple SQL statements")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::Medium)
+            .confidence(Confidence::Low)
+            .paranoia(3)
+            .pattern(r"(?i)(SELECT|INSERT|UPDATE|DELETE).{5,100};.{0,20}(SELECT|INSERT|UPDATE|DELETE)")
+            .base_score(5)
+            .cwe(89)
+            .tags(&["sqli", "sqli-stacked"])
+            .build()?,
+
+        // Quote manipulation
+        RuleBuilder::new(942190, "SQL Injection: String escape")
+            .description("Detects quote escape sequences")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::Medium)
+            .confidence(Confidence::Medium)
+            .paranoia(2)
+            .pattern(r#"(\\x27|\\x22|%27|%22|''|"")"#)
+            .base_score(5)
+            .cwe(89)
+            .tags(&["sqli", "sqli-escape"])
+            .build()?,
+
+        RuleBuilder::new(942191, "SQL Injection: Quote balance attack")
+            .description("Detects unbalanced quote injection")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::Medium)
+            .confidence(Confidence::Low)
+            .paranoia(3)
+            .pattern(r"^[^']*'[^']*'[^']*'[^']*$")
+            .base_score(4)
+            .cwe(89)
+            .tags(&["sqli", "sqli-escape"])
+            .build()?,
+
+        // Hex encoding
+        RuleBuilder::new(942195, "SQL Injection: Hex encoded string")
+            .description("Detects hex-encoded SQL strings")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(2)
+            .pattern(r"(?i)0x[0-9a-f]{8,}")
+            .base_score(7)
+            .cwe(89)
+            .tags(&["sqli", "sqli-encoded"])
+            .build()?,
+
+        RuleBuilder::new(942196, "SQL Injection: CHAR function")
+            .description("Detects CHAR() function for string construction")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(2)
+            .pattern(r"(?i)CHAR\s*\(\s*\d+(\s*,\s*\d+)+\s*\)")
+            .base_score(8)
+            .cwe(89)
+            .tags(&["sqli", "sqli-encoded"])
+            .build()?,
+
+        RuleBuilder::new(942197, "SQL Injection: CHR function (Oracle)")
+            .description("Detects Oracle CHR() function for string construction")
+            .attack_type(AttackType::SqlInjection)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(2)
+            .pattern(r"(?i)CHR\s*\(\s*\d+\s*\)(\s*\|\|\s*CHR\s*\(\s*\d+\s*\))+")
+            .base_score(8)
+            .cwe(89)
+            .tags(&["sqli", "sqli-encoded", "oracle"])
+            .build()?,
+    ])
+}

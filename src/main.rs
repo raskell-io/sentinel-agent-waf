@@ -88,6 +88,7 @@ impl Args {
             body_inspection_enabled: self.body_inspection,
             max_body_size: self.max_body_size,
             response_inspection_enabled: self.response_inspection,
+            ..Default::default()
         }
     }
 }

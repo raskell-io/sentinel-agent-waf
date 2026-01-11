@@ -1,0 +1,197 @@
+//! Server-Side Request Forgery (SSRF) Rules
+
+use crate::rules::{AttackType, Confidence, Rule, RuleBuilder, Severity};
+use anyhow::Result;
+
+pub fn rules(paranoia_level: u8) -> Result<Vec<Rule>> {
+    let all_rules = vec![
+        // Cloud metadata endpoints
+        RuleBuilder::new(936100, "SSRF: AWS metadata endpoint")
+            .description("Detects AWS EC2 metadata endpoint access")
+            .attack_type(AttackType::Ssrf)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)(169\.254\.169\.254|metadata\.google\.internal|metadata\.azure\.com)")
+            .base_score(10)
+            .cwe(918)
+            .tags(&["ssrf", "cloud", "aws"])
+            .build()?,
+
+        RuleBuilder::new(936101, "SSRF: AWS IMDSv1 path")
+            .description("Detects AWS IMDSv1 API paths")
+            .attack_type(AttackType::Ssrf)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)/latest/(meta-data|user-data|api/token)")
+            .base_score(10)
+            .cwe(918)
+            .tags(&["ssrf", "cloud", "aws"])
+            .build()?,
+
+        RuleBuilder::new(936102, "SSRF: GCP metadata")
+            .description("Detects GCP metadata endpoint")
+            .attack_type(AttackType::Ssrf)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)/computeMetadata/v1/")
+            .base_score(10)
+            .cwe(918)
+            .tags(&["ssrf", "cloud", "gcp"])
+            .build()?,
+
+        RuleBuilder::new(936103, "SSRF: DigitalOcean metadata")
+            .description("Detects DigitalOcean metadata endpoint")
+            .attack_type(AttackType::Ssrf)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)169\.254\.169\.254/metadata/v1/")
+            .base_score(10)
+            .cwe(918)
+            .tags(&["ssrf", "cloud", "digitalocean"])
+            .build()?,
+
+        // Internal IP ranges
+        RuleBuilder::new(936110, "SSRF: Private IP 10.x.x.x")
+            .description("Detects access to 10.0.0.0/8 network")
+            .attack_type(AttackType::Ssrf)
+            .severity(Severity::High)
+            .confidence(Confidence::Medium)
+            .paranoia(1)
+            .pattern(r"(?i)(https?://|@)10\.\d{1,3}\.\d{1,3}\.\d{1,3}")
+            .base_score(8)
+            .cwe(918)
+            .tags(&["ssrf", "internal-ip"])
+            .build()?,
+
+        RuleBuilder::new(936111, "SSRF: Private IP 172.16-31.x.x")
+            .description("Detects access to 172.16.0.0/12 network")
+            .attack_type(AttackType::Ssrf)
+            .severity(Severity::High)
+            .confidence(Confidence::Medium)
+            .paranoia(1)
+            .pattern(r"(?i)(https?://|@)172\.(1[6-9]|2[0-9]|3[0-1])\.\d{1,3}\.\d{1,3}")
+            .base_score(8)
+            .cwe(918)
+            .tags(&["ssrf", "internal-ip"])
+            .build()?,
+
+        RuleBuilder::new(936112, "SSRF: Private IP 192.168.x.x")
+            .description("Detects access to 192.168.0.0/16 network")
+            .attack_type(AttackType::Ssrf)
+            .severity(Severity::High)
+            .confidence(Confidence::Medium)
+            .paranoia(1)
+            .pattern(r"(?i)(https?://|@)192\.168\.\d{1,3}\.\d{1,3}")
+            .base_score(8)
+            .cwe(918)
+            .tags(&["ssrf", "internal-ip"])
+            .build()?,
+
+        RuleBuilder::new(936113, "SSRF: Localhost access")
+            .description("Detects localhost/loopback access")
+            .attack_type(AttackType::Ssrf)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)(https?://|@)(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|0177\.)")
+            .base_score(9)
+            .cwe(918)
+            .tags(&["ssrf", "localhost"])
+            .build()?,
+
+        RuleBuilder::new(936114, "SSRF: IPv6 loopback")
+            .description("Detects IPv6 loopback access")
+            .attack_type(AttackType::Ssrf)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)(https?://|@)\[?::1\]?")
+            .base_score(9)
+            .cwe(918)
+            .tags(&["ssrf", "localhost", "ipv6"])
+            .build()?,
+
+        // Protocol handlers
+        RuleBuilder::new(936120, "SSRF: file:// protocol")
+            .description("Detects file:// protocol for local file read")
+            .attack_type(AttackType::Ssrf)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)file://")
+            .base_score(10)
+            .cwe(918)
+            .tags(&["ssrf", "file-protocol"])
+            .build()?,
+
+        RuleBuilder::new(936121, "SSRF: gopher:// protocol")
+            .description("Detects gopher:// protocol for SSRF exploitation")
+            .attack_type(AttackType::Ssrf)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)gopher://")
+            .base_score(10)
+            .cwe(918)
+            .tags(&["ssrf", "gopher"])
+            .build()?,
+
+        RuleBuilder::new(936122, "SSRF: dict:// protocol")
+            .description("Detects dict:// protocol")
+            .attack_type(AttackType::Ssrf)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)dict://")
+            .base_score(8)
+            .cwe(918)
+            .tags(&["ssrf", "dict"])
+            .build()?,
+
+        // URL encoding bypass
+        RuleBuilder::new(936130, "SSRF: Octal IP encoding")
+            .description("Detects octal-encoded IP addresses")
+            .attack_type(AttackType::Ssrf)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(2)
+            .pattern(r"(?i)(https?://|@)0[0-7]+\.0[0-7]+\.0[0-7]+\.0[0-7]+")
+            .base_score(8)
+            .cwe(918)
+            .tags(&["ssrf", "encoding"])
+            .build()?,
+
+        RuleBuilder::new(936131, "SSRF: Decimal IP encoding")
+            .description("Detects decimal-encoded IP addresses (e.g., 2130706433)")
+            .attack_type(AttackType::Ssrf)
+            .severity(Severity::High)
+            .confidence(Confidence::Medium)
+            .paranoia(2)
+            .pattern(r"(?i)(https?://|@)\d{8,10}(:|/|$)")
+            .base_score(7)
+            .cwe(918)
+            .tags(&["ssrf", "encoding"])
+            .build()?,
+
+        RuleBuilder::new(936132, "SSRF: Hex IP encoding")
+            .description("Detects hex-encoded IP addresses")
+            .attack_type(AttackType::Ssrf)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(2)
+            .pattern(r"(?i)(https?://|@)0x[0-9a-f]+\.")
+            .base_score(8)
+            .cwe(918)
+            .tags(&["ssrf", "encoding"])
+            .build()?,
+    ];
+
+    Ok(all_rules
+        .into_iter()
+        .filter(|r| r.paranoia_level <= paranoia_level)
+        .collect())
+}

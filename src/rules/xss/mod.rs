@@ -1,0 +1,425 @@
+//! XSS (Cross-Site Scripting) Detection Rules
+//!
+//! Comprehensive XSS detection covering:
+//! - Reflected XSS
+//! - DOM-based XSS
+//! - Stored XSS indicators
+//! - Polyglot payloads
+
+use crate::rules::{AttackType, Confidence, Rule, RuleBuilder, Severity};
+use anyhow::Result;
+
+pub fn rules(paranoia_level: u8) -> Result<Vec<Rule>> {
+    let all_rules = vec![
+        // Script tags (high confidence)
+        RuleBuilder::new(941100, "XSS: Script tag detected")
+            .description("Detects script tags in input")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)<script[^>]*>")
+            .base_score(9)
+            .cwe(79)
+            .owasp("A03:2021-Injection")
+            .tags(&["xss", "xss-script"])
+            .build()?,
+
+        RuleBuilder::new(941101, "XSS: Closing script tag")
+            .description("Detects closing script tag")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)</script>")
+            .base_score(8)
+            .cwe(79)
+            .tags(&["xss", "xss-script"])
+            .build()?,
+
+        RuleBuilder::new(941102, "XSS: Script src attribute")
+            .description("Detects external script loading")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r#"(?i)<script[^>]+src\s*=\s*["']?[^"'>\s]+"#)
+            .base_score(10)
+            .cwe(79)
+            .tags(&["xss", "xss-script"])
+            .build()?,
+
+        // Event handlers
+        RuleBuilder::new(941110, "XSS: Event handler onerror")
+            .description("Detects onerror event handler")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)\bonerror\s*=")
+            .base_score(9)
+            .cwe(79)
+            .tags(&["xss", "xss-event"])
+            .build()?,
+
+        RuleBuilder::new(941111, "XSS: Event handler onload")
+            .description("Detects onload event handler")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)\bonload\s*=")
+            .base_score(9)
+            .cwe(79)
+            .tags(&["xss", "xss-event"])
+            .build()?,
+
+        RuleBuilder::new(941112, "XSS: Event handler onclick")
+            .description("Detects onclick event handler")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)\bonclick\s*=")
+            .base_score(8)
+            .cwe(79)
+            .tags(&["xss", "xss-event"])
+            .build()?,
+
+        RuleBuilder::new(941113, "XSS: Event handler onmouseover")
+            .description("Detects onmouseover event handler")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)\bonmouseover\s*=")
+            .base_score(8)
+            .cwe(79)
+            .tags(&["xss", "xss-event"])
+            .build()?,
+
+        RuleBuilder::new(941114, "XSS: Event handler onfocus onblur")
+            .description("Detects focus-related event handlers")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)\b(onfocus|onblur)\s*=")
+            .base_score(8)
+            .cwe(79)
+            .tags(&["xss", "xss-event"])
+            .build()?,
+
+        RuleBuilder::new(941115, "XSS: Generic event handler")
+            .description("Detects any on* event handler")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::Medium)
+            .confidence(Confidence::Medium)
+            .paranoia(2)
+            .pattern(r"(?i)\bon[a-z]{3,15}\s*=")
+            .base_score(6)
+            .cwe(79)
+            .tags(&["xss", "xss-event"])
+            .build()?,
+
+        // JavaScript URLs
+        RuleBuilder::new(941120, "XSS: javascript URI")
+            .description("Detects javascript protocol URI")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)javascript\s*:")
+            .base_score(9)
+            .cwe(79)
+            .tags(&["xss", "xss-uri"])
+            .build()?,
+
+        RuleBuilder::new(941121, "XSS: vbscript URI")
+            .description("Detects vbscript protocol URI")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)vbscript\s*:")
+            .base_score(9)
+            .cwe(79)
+            .tags(&["xss", "xss-uri"])
+            .build()?,
+
+        RuleBuilder::new(941122, "XSS: data URI with HTML")
+            .description("Detects data URI with text/html")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)data\s*:\s*text/html")
+            .base_score(8)
+            .cwe(79)
+            .tags(&["xss", "xss-uri"])
+            .build()?,
+
+        RuleBuilder::new(941123, "XSS: data URI base64")
+            .description("Detects base64-encoded data URI")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::Medium)
+            .confidence(Confidence::Medium)
+            .paranoia(2)
+            .pattern(r"(?i)data\s*:[^;]+;\s*base64")
+            .base_score(6)
+            .cwe(79)
+            .tags(&["xss", "xss-uri"])
+            .build()?,
+
+        // Dangerous HTML tags
+        RuleBuilder::new(941130, "XSS: iframe tag")
+            .description("Detects iframe tag injection")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)<iframe")
+            .base_score(8)
+            .cwe(79)
+            .tags(&["xss", "xss-tag"])
+            .build()?,
+
+        RuleBuilder::new(941131, "XSS: object embed tag")
+            .description("Detects object or embed tag injection")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)<(object|embed|applet)")
+            .base_score(8)
+            .cwe(79)
+            .tags(&["xss", "xss-tag"])
+            .build()?,
+
+        RuleBuilder::new(941132, "XSS: SVG tag")
+            .description("Detects SVG tag with potential JS")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::High)
+            .confidence(Confidence::Medium)
+            .paranoia(1)
+            .pattern(r"(?i)<svg[^>]*>")
+            .base_score(7)
+            .cwe(79)
+            .tags(&["xss", "xss-tag", "xss-svg"])
+            .build()?,
+
+        RuleBuilder::new(941133, "XSS: math tag")
+            .description("Detects math tag XSS vector")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::Medium)
+            .confidence(Confidence::Medium)
+            .paranoia(2)
+            .pattern(r"(?i)<math[^>]*>")
+            .base_score(5)
+            .cwe(79)
+            .tags(&["xss", "xss-tag"])
+            .build()?,
+
+        RuleBuilder::new(941134, "XSS: img tag with onerror")
+            .description("Detects img tag XSS vector")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)<img[^>]+onerror\s*=")
+            .base_score(9)
+            .cwe(79)
+            .tags(&["xss", "xss-tag", "xss-event"])
+            .build()?,
+
+        RuleBuilder::new(941135, "XSS: body tag with onload")
+            .description("Detects body tag XSS vector")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)<body[^>]+onload\s*=")
+            .base_score(8)
+            .cwe(79)
+            .tags(&["xss", "xss-tag", "xss-event"])
+            .build()?,
+
+        // CSS-based XSS
+        RuleBuilder::new(941140, "XSS: CSS expression")
+            .description("Detects CSS expression injection")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)expression\s*\(")
+            .base_score(8)
+            .cwe(79)
+            .tags(&["xss", "xss-css"])
+            .build()?,
+
+        RuleBuilder::new(941141, "XSS: CSS behavior")
+            .description("Detects CSS behavior injection")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)behavior\s*:")
+            .base_score(8)
+            .cwe(79)
+            .tags(&["xss", "xss-css"])
+            .build()?,
+
+        RuleBuilder::new(941142, "XSS: CSS moz-binding")
+            .description("Detects Firefox XBL binding injection")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)-moz-binding\s*:")
+            .base_score(8)
+            .cwe(79)
+            .tags(&["xss", "xss-css"])
+            .build()?,
+
+        RuleBuilder::new(941143, "XSS: style tag")
+            .description("Detects style tag injection")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::Medium)
+            .confidence(Confidence::Medium)
+            .paranoia(2)
+            .pattern(r"(?i)<style[^>]*>")
+            .base_score(5)
+            .cwe(79)
+            .tags(&["xss", "xss-css"])
+            .build()?,
+
+        // DOM-based XSS
+        RuleBuilder::new(941150, "XSS: document.write")
+            .description("Detects document.write DOM sink")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::High)
+            .confidence(Confidence::Medium)
+            .paranoia(2)
+            .pattern(r"(?i)document\s*[.]\s*write(ln)?\s*\(")
+            .base_score(7)
+            .cwe(79)
+            .tags(&["xss", "xss-dom"])
+            .build()?,
+
+        RuleBuilder::new(941151, "XSS: innerHTML")
+            .description("Detects innerHTML DOM sink")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::High)
+            .confidence(Confidence::Medium)
+            .paranoia(2)
+            .pattern(r"(?i)[.]innerHTML\s*=")
+            .base_score(7)
+            .cwe(79)
+            .tags(&["xss", "xss-dom"])
+            .build()?,
+
+        RuleBuilder::new(941152, "XSS: eval function")
+            .description("Detects eval function call")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)\beval\s*\(")
+            .base_score(9)
+            .cwe(79)
+            .tags(&["xss", "xss-dom", "rce"])
+            .build()?,
+
+        RuleBuilder::new(941153, "XSS: setTimeout setInterval with string")
+            .description("Detects timer functions with string code")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::High)
+            .confidence(Confidence::Medium)
+            .paranoia(2)
+            .pattern(r#"(?i)(setTimeout|setInterval)\s*\(\s*['"]"#)
+            .base_score(7)
+            .cwe(79)
+            .tags(&["xss", "xss-dom"])
+            .build()?,
+
+        RuleBuilder::new(941154, "XSS: Function constructor")
+            .description("Detects Function constructor for code execution")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::Critical)
+            .confidence(Confidence::High)
+            .paranoia(1)
+            .pattern(r"(?i)new\s+Function\s*\(")
+            .base_score(9)
+            .cwe(79)
+            .tags(&["xss", "xss-dom", "rce"])
+            .build()?,
+
+        // Polyglot payloads
+        RuleBuilder::new(941160, "XSS: Polyglot jaVasCript")
+            .description("Detects case-mixed javascript obfuscation")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::High)
+            .confidence(Confidence::High)
+            .paranoia(2)
+            .pattern(r"(jaVasCript|JaVaScRiPt|jAvAsCrIpT)")
+            .base_score(8)
+            .cwe(79)
+            .tags(&["xss", "xss-evasion"])
+            .build()?,
+
+        RuleBuilder::new(941161, "XSS: HTML entity encoding")
+            .description("Detects HTML entity encoded XSS")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::Medium)
+            .confidence(Confidence::Medium)
+            .paranoia(2)
+            .pattern(r"(?i)(&lt;|&#60;|&#x3c;)\s*script")
+            .base_score(6)
+            .cwe(79)
+            .tags(&["xss", "xss-encoded"])
+            .build()?,
+
+        RuleBuilder::new(941162, "XSS: Unicode encoding")
+            .description("Detects Unicode encoded XSS")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::Medium)
+            .confidence(Confidence::Medium)
+            .paranoia(2)
+            .pattern(r"(\\u003c|\\x3c|%3c)")
+            .base_score(6)
+            .cwe(79)
+            .tags(&["xss", "xss-encoded"])
+            .build()?,
+
+        // Alert/confirm/prompt (useful for testing)
+        RuleBuilder::new(941170, "XSS: alert function")
+            .description("Detects alert function")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::Medium)
+            .confidence(Confidence::Medium)
+            .paranoia(2)
+            .pattern(r"(?i)\balert\s*\(")
+            .base_score(5)
+            .cwe(79)
+            .tags(&["xss", "xss-test"])
+            .build()?,
+
+        RuleBuilder::new(941171, "XSS: confirm prompt function")
+            .description("Detects confirm/prompt functions")
+            .attack_type(AttackType::Xss)
+            .severity(Severity::Medium)
+            .confidence(Confidence::Medium)
+            .paranoia(2)
+            .pattern(r"(?i)\b(confirm|prompt)\s*\(")
+            .base_score(5)
+            .cwe(79)
+            .tags(&["xss", "xss-test"])
+            .build()?,
+    ];
+
+    // Filter by paranoia level
+    Ok(all_rules
+        .into_iter()
+        .filter(|r| r.paranoia_level <= paranoia_level)
+        .collect())
+}
