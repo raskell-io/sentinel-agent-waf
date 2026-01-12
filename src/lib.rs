@@ -22,11 +22,19 @@
 //! server.run().await?;
 //! ```
 
+pub mod api;
+pub mod automata;
+pub mod bot;
 pub mod config;
+pub mod credential;
 pub mod detection;
 pub mod engine;
+pub mod ml;
+pub mod plugin;
 pub mod rules;
 pub mod scoring;
+pub mod sensitive;
+pub mod streaming;
 
 // Re-exports for convenience
 pub use config::{ScoringConfig, WafConfig, WafConfigJson};
@@ -46,16 +54,30 @@ use sentinel_agent_protocol::{
     RequestHeadersEvent, ResponseBodyChunkEvent, ResponseHeadersEvent,
 };
 
-/// Body accumulator for tracking in-progress bodies
+/// Body accumulator for tracking in-progress bodies (buffered mode)
 #[derive(Debug, Default)]
 struct BodyAccumulator {
     data: Vec<u8>,
 }
 
+/// Body inspection state - either buffered or streaming
+enum BodyInspectionState {
+    /// Buffered mode - accumulate full body before inspection
+    Buffered(BodyAccumulator),
+    /// Streaming mode - inspect incrementally with overlap buffer
+    Streaming(streaming::StreamingInspector),
+}
+
+impl Default for BodyInspectionState {
+    fn default() -> Self {
+        BodyInspectionState::Buffered(BodyAccumulator::default())
+    }
+}
+
 /// WAF agent implementing the Sentinel agent protocol
 pub struct WafAgent {
     engine: Arc<RwLock<WafEngine>>,
-    pending_request_bodies: Arc<RwLock<HashMap<String, BodyAccumulator>>>,
+    pending_request_bodies: Arc<RwLock<HashMap<String, BodyInspectionState>>>,
     pending_response_bodies: Arc<RwLock<HashMap<String, BodyAccumulator>>>,
 }
 
@@ -261,48 +283,134 @@ impl AgentHandler for WafAgent {
             }
         };
 
-        // Accumulate chunk
         let mut pending = self.pending_request_bodies.write().await;
-        let accumulator = pending
-            .entry(event.correlation_id.clone())
-            .or_insert_with(BodyAccumulator::default);
 
-        // Check size limit before accumulating
-        if accumulator.data.len() + chunk.len() > engine.config.max_body_size {
-            debug!(
-                correlation_id = %event.correlation_id,
-                current_size = accumulator.data.len(),
-                chunk_size = chunk.len(),
-                max_size = engine.config.max_body_size,
-                "Body exceeds max size, skipping inspection"
-            );
-            pending.remove(&event.correlation_id);
-            return AgentResponse::default_allow();
+        // Get or create inspection state
+        // Use streaming mode if enabled and this is the first chunk
+        let state = pending.entry(event.correlation_id.clone()).or_insert_with(|| {
+            if engine.config.streaming.enabled {
+                BodyInspectionState::Streaming(streaming::StreamingInspector::new(&engine.config.streaming))
+            } else {
+                BodyInspectionState::Buffered(BodyAccumulator::default())
+            }
+        });
+
+        match state {
+            BodyInspectionState::Buffered(accumulator) => {
+                // Check size limit before accumulating
+                if accumulator.data.len() + chunk.len() > engine.config.max_body_size {
+                    debug!(
+                        correlation_id = %event.correlation_id,
+                        current_size = accumulator.data.len(),
+                        chunk_size = chunk.len(),
+                        max_size = engine.config.max_body_size,
+                        "Body exceeds max size, skipping inspection"
+                    );
+                    pending.remove(&event.correlation_id);
+                    return AgentResponse::default_allow();
+                }
+
+                accumulator.data.extend(chunk);
+
+                // If this is the last chunk, inspect the full body
+                if event.is_last {
+                    if let Some(BodyInspectionState::Buffered(body_data)) = pending.remove(&event.correlation_id) {
+                        let body_str = String::from_utf8_lossy(&body_data.data);
+
+                        debug!(
+                            correlation_id = %event.correlation_id,
+                            body_size = body_data.data.len(),
+                            "Inspecting request body (buffered mode)"
+                        );
+
+                        let detections = engine.check(&body_str, "body");
+                        let (decision, detections) = self.make_decision(&engine, detections, "body");
+                        return self.build_response(
+                            decision,
+                            &detections,
+                            vec!["waf".to_string(), "body".to_string()],
+                        );
+                    }
+                }
+
+                AgentResponse::default_allow()
+            }
+
+            BodyInspectionState::Streaming(inspector) => {
+                // Check if already terminated early
+                if inspector.is_terminated() {
+                    // Already decided to block - maintain decision
+                    if event.is_last {
+                        let result = pending.remove(&event.correlation_id);
+                        if let Some(BodyInspectionState::Streaming(inspector)) = result {
+                            let streaming_result = inspector.finalize();
+                            info!(
+                                correlation_id = %event.correlation_id,
+                                bytes_processed = streaming_result.bytes_processed,
+                                detections = streaming_result.detections.len(),
+                                score = streaming_result.score.total,
+                                "Early termination - body inspection complete"
+                            );
+                            let (decision, detections) = self.make_decision(&engine, streaming_result.detections, "body");
+                            return self.build_response(
+                                decision,
+                                &detections,
+                                vec!["waf".to_string(), "body".to_string(), "streaming".to_string()],
+                            );
+                        }
+                    }
+                    return AgentResponse::default_allow();
+                }
+
+                // Prepare chunk for inspection (includes overlap from previous chunk)
+                if let Some(inspection_text) = inspector.prepare_chunk(&chunk) {
+                    // Inspect the chunk
+                    let detections = engine.check(&inspection_text, "body");
+
+                    // Add detections and check for early termination
+                    let location_weight = engine.config.scoring.location_weights.body;
+                    if !inspector.add_detections_with_weights(detections, location_weight, 1.0) {
+                        // Early termination triggered
+                        info!(
+                            correlation_id = %event.correlation_id,
+                            bytes_processed = inspector.bytes_processed(),
+                            score = inspector.score().total,
+                            "Early termination triggered - score threshold exceeded"
+                        );
+
+                        // If not last chunk, just return allow and wait for final chunk
+                        if !event.is_last {
+                            return AgentResponse::default_allow();
+                        }
+                    }
+                }
+
+                // If this is the last chunk, finalize and make decision
+                if event.is_last {
+                    if let Some(BodyInspectionState::Streaming(inspector)) = pending.remove(&event.correlation_id) {
+                        let streaming_result = inspector.finalize();
+
+                        debug!(
+                            correlation_id = %event.correlation_id,
+                            bytes_processed = streaming_result.bytes_processed,
+                            detections = streaming_result.detections.len(),
+                            score = streaming_result.score.total,
+                            duration_ms = streaming_result.duration.as_millis(),
+                            "Streaming body inspection complete"
+                        );
+
+                        let (decision, detections) = self.make_decision(&engine, streaming_result.detections, "body");
+                        return self.build_response(
+                            decision,
+                            &detections,
+                            vec!["waf".to_string(), "body".to_string(), "streaming".to_string()],
+                        );
+                    }
+                }
+
+                AgentResponse::default_allow()
+            }
         }
-
-        accumulator.data.extend(chunk);
-
-        // If this is the last chunk, inspect the full body
-        if event.is_last {
-            let body_data = pending.remove(&event.correlation_id).unwrap();
-            let body_str = String::from_utf8_lossy(&body_data.data);
-
-            debug!(
-                correlation_id = %event.correlation_id,
-                body_size = body_data.data.len(),
-                "Inspecting request body"
-            );
-
-            let detections = engine.check(&body_str, "body");
-            let (decision, detections) = self.make_decision(&engine, detections, "body");
-            return self.build_response(
-                decision,
-                &detections,
-                vec!["waf".to_string(), "body".to_string()],
-            );
-        }
-
-        AgentResponse::default_allow()
     }
 
     async fn on_response_body_chunk(&self, event: ResponseBodyChunkEvent) -> AgentResponse {

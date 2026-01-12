@@ -36,6 +36,306 @@ pub struct WafConfig {
     pub scoring: ScoringConfig,
     /// Rule management configuration
     pub rules: RuleManagement,
+    /// Streaming body inspection configuration
+    pub streaming: StreamingConfig,
+    /// ML-based detection configuration
+    pub ml: MlConfig,
+    /// API security configuration (GraphQL, JSON, JWT)
+    pub api_security: ApiSecurityConfig,
+    /// Bot detection configuration
+    pub bot_detection: BotDetectionConfig,
+    /// Credential stuffing protection configuration
+    pub credential_protection: CredentialProtectionConfig,
+    /// Sensitive data detection configuration
+    pub sensitive_data: SensitiveDataDetectionConfig,
+}
+
+/// Configuration for API security inspection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct ApiSecurityConfig {
+    /// Enable GraphQL inspection
+    #[serde(default)]
+    pub graphql_enabled: bool,
+    /// Enable JSON inspection
+    #[serde(default = "default_true")]
+    pub json_enabled: bool,
+    /// Enable JWT inspection
+    #[serde(default = "default_true")]
+    pub jwt_enabled: bool,
+    /// Block GraphQL introspection queries
+    #[serde(default = "default_true")]
+    pub block_introspection: bool,
+    /// Maximum GraphQL query depth
+    #[serde(default = "default_graphql_depth")]
+    pub graphql_max_depth: usize,
+    /// Block JWT "none" algorithm
+    #[serde(default = "default_true")]
+    pub jwt_block_none: bool,
+}
+
+impl Default for ApiSecurityConfig {
+    fn default() -> Self {
+        Self {
+            graphql_enabled: false,
+            json_enabled: true,
+            jwt_enabled: true,
+            block_introspection: true,
+            graphql_max_depth: 10,
+            jwt_block_none: true,
+        }
+    }
+}
+
+fn default_graphql_depth() -> usize {
+    10
+}
+
+/// Configuration for bot detection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct BotDetectionConfig {
+    /// Enable bot detection
+    #[serde(default)]
+    pub enabled: bool,
+    /// Enable timing-based detection
+    #[serde(default = "default_true")]
+    pub timing_detection: bool,
+    /// Enable header anomaly detection
+    #[serde(default = "default_true")]
+    pub header_anomaly_detection: bool,
+    /// Allow known good bots (Google, Bing, etc.)
+    #[serde(default = "default_true")]
+    pub allow_good_bots: bool,
+    /// Minimum request interval (ms) before flagging
+    #[serde(default = "default_min_interval")]
+    pub min_request_interval_ms: u64,
+}
+
+impl Default for BotDetectionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            timing_detection: true,
+            header_anomaly_detection: true,
+            allow_good_bots: true,
+            min_request_interval_ms: 100,
+        }
+    }
+}
+
+fn default_min_interval() -> u64 {
+    100
+}
+
+/// Configuration for credential stuffing protection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct CredentialProtectionConfig {
+    /// Enable credential protection
+    #[serde(default)]
+    pub enabled: bool,
+    /// Maximum failed logins per IP per window
+    #[serde(default = "default_max_failures_per_ip")]
+    pub max_failures_per_ip: usize,
+    /// Maximum failed logins per username per window
+    #[serde(default = "default_max_failures_per_user")]
+    pub max_failures_per_user: usize,
+    /// Time window in seconds
+    #[serde(default = "default_credential_window")]
+    pub window_secs: u64,
+    /// Login endpoint paths
+    #[serde(default = "default_login_paths")]
+    pub login_paths: Vec<String>,
+}
+
+impl Default for CredentialProtectionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_failures_per_ip: 10,
+            max_failures_per_user: 5,
+            window_secs: 300,
+            login_paths: default_login_paths(),
+        }
+    }
+}
+
+fn default_max_failures_per_ip() -> usize {
+    10
+}
+
+fn default_max_failures_per_user() -> usize {
+    5
+}
+
+fn default_credential_window() -> u64 {
+    300
+}
+
+fn default_login_paths() -> Vec<String> {
+    vec![
+        "/login".to_string(),
+        "/signin".to_string(),
+        "/auth".to_string(),
+        "/api/login".to_string(),
+        "/api/auth".to_string(),
+    ]
+}
+
+/// Configuration for sensitive data detection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct SensitiveDataDetectionConfig {
+    /// Enable sensitive data detection in responses
+    #[serde(default)]
+    pub enabled: bool,
+    /// Detect credit card numbers
+    #[serde(default = "default_true")]
+    pub credit_card_detection: bool,
+    /// Detect Social Security Numbers
+    #[serde(default = "default_true")]
+    pub ssn_detection: bool,
+    /// Detect API keys and tokens
+    #[serde(default = "default_true")]
+    pub api_key_detection: bool,
+    /// Detect private keys
+    #[serde(default = "default_true")]
+    pub private_key_detection: bool,
+}
+
+impl Default for SensitiveDataDetectionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            credit_card_detection: true,
+            ssn_detection: true,
+            api_key_detection: true,
+            private_key_detection: true,
+        }
+    }
+}
+
+/// Configuration for streaming body inspection
+///
+/// Streaming mode inspects request bodies incrementally as chunks arrive,
+/// using a sliding window with overlap to detect patterns that span chunks.
+/// This provides constant memory usage regardless of body size.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct StreamingConfig {
+    /// Enable streaming mode (vs full buffering)
+    #[serde(default)]
+    pub enabled: bool,
+    /// Size of overlap buffer between chunks (bytes)
+    /// This ensures patterns spanning chunk boundaries are detected.
+    /// Default: 256 bytes (enough for most attack patterns)
+    #[serde(default = "default_window_overlap")]
+    pub window_overlap: usize,
+    /// Score threshold for early termination
+    /// If accumulated score exceeds this, stop inspecting and block immediately.
+    /// Default: 50 (2x block threshold)
+    #[serde(default = "default_early_termination")]
+    pub early_termination_threshold: u32,
+    /// Timeout for abandoned streaming sessions (seconds)
+    /// Sessions without activity for this duration are cleaned up.
+    /// Default: 300 seconds (5 minutes)
+    #[serde(default = "default_cleanup_timeout")]
+    pub cleanup_timeout_secs: u64,
+    /// Minimum body size to use streaming (bytes)
+    /// Bodies smaller than this are inspected in full (more efficient).
+    /// Default: 4096 bytes (4KB)
+    #[serde(default = "default_min_streaming_size")]
+    pub min_streaming_size: usize,
+}
+
+impl Default for StreamingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            window_overlap: 256,
+            early_termination_threshold: 50,
+            cleanup_timeout_secs: 300,
+            min_streaming_size: 4096,
+        }
+    }
+}
+
+fn default_window_overlap() -> usize {
+    256
+}
+
+fn default_early_termination() -> u32 {
+    50
+}
+
+fn default_cleanup_timeout() -> u64 {
+    300
+}
+
+fn default_min_streaming_size() -> usize {
+    4096
+}
+
+/// Configuration for ML-based attack detection
+///
+/// ML detection runs alongside rule-based detection to catch attack
+/// variations that bypass regex patterns. Scores from ML detection
+/// contribute to the overall anomaly score.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct MlConfig {
+    /// Enable ML-based attack classification
+    #[serde(default)]
+    pub classifier_enabled: bool,
+    /// Minimum confidence threshold for ML detections (0.0 - 1.0)
+    #[serde(default = "default_ml_confidence")]
+    pub min_confidence: f32,
+    /// Enable request fingerprinting for anomaly detection
+    #[serde(default)]
+    pub fingerprinting_enabled: bool,
+    /// Anomaly threshold for fingerprinting (0.0 - 1.0)
+    #[serde(default = "default_anomaly_threshold")]
+    pub anomaly_threshold: f32,
+    /// Enable payload similarity detection
+    #[serde(default)]
+    pub similarity_enabled: bool,
+    /// Similarity threshold for flagging payloads (0.0 - 1.0)
+    #[serde(default = "default_similarity_threshold")]
+    pub similarity_threshold: f32,
+    /// Score contribution from ML detections (multiplier)
+    #[serde(default = "default_ml_score_weight")]
+    pub score_weight: f32,
+}
+
+impl Default for MlConfig {
+    fn default() -> Self {
+        Self {
+            classifier_enabled: false,
+            min_confidence: 0.4,
+            fingerprinting_enabled: false,
+            anomaly_threshold: 0.5,
+            similarity_enabled: false,
+            similarity_threshold: 0.5,
+            score_weight: 1.0,
+        }
+    }
+}
+
+fn default_ml_confidence() -> f32 {
+    0.4
+}
+
+fn default_anomaly_threshold() -> f32 {
+    0.5
+}
+
+fn default_similarity_threshold() -> f32 {
+    0.5
+}
+
+fn default_ml_score_weight() -> f32 {
+    1.0
 }
 
 impl Default for WafConfig {
@@ -54,6 +354,12 @@ impl Default for WafConfig {
             response_inspection_enabled: false,
             scoring: ScoringConfig::default(),
             rules: RuleManagement::default(),
+            streaming: StreamingConfig::default(),
+            ml: MlConfig::default(),
+            api_security: ApiSecurityConfig::default(),
+            bot_detection: BotDetectionConfig::default(),
+            credential_protection: CredentialProtectionConfig::default(),
+            sensitive_data: SensitiveDataDetectionConfig::default(),
         }
     }
 }
@@ -292,6 +598,18 @@ pub struct WafConfigJson {
     pub scoring: Option<ScoringConfig>,
     #[serde(default)]
     pub rules: Option<RuleManagement>,
+    #[serde(default)]
+    pub streaming: Option<StreamingConfig>,
+    #[serde(default)]
+    pub ml: Option<MlConfig>,
+    #[serde(default)]
+    pub api_security: Option<ApiSecurityConfig>,
+    #[serde(default)]
+    pub bot_detection: Option<BotDetectionConfig>,
+    #[serde(default)]
+    pub credential_protection: Option<CredentialProtectionConfig>,
+    #[serde(default)]
+    pub sensitive_data: Option<SensitiveDataDetectionConfig>,
 }
 
 fn default_paranoia() -> u8 {
@@ -350,6 +668,12 @@ impl From<WafConfigJson> for WafConfig {
             response_inspection_enabled: json.response_inspection,
             scoring: json.scoring.unwrap_or_default(),
             rules: json.rules.unwrap_or_default(),
+            streaming: json.streaming.unwrap_or_default(),
+            ml: json.ml.unwrap_or_default(),
+            api_security: json.api_security.unwrap_or_default(),
+            bot_detection: json.bot_detection.unwrap_or_default(),
+            credential_protection: json.credential_protection.unwrap_or_default(),
+            sensitive_data: json.sensitive_data.unwrap_or_default(),
         }
     }
 }

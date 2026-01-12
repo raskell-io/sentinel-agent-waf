@@ -21,6 +21,8 @@ pub enum AttackType {
     XpathInjection,
     Ssrf,
     Deserialization,
+    // Phase 3 attack types
+    DataLeakage,
 }
 
 impl std::fmt::Display for AttackType {
@@ -38,6 +40,7 @@ impl std::fmt::Display for AttackType {
             AttackType::XpathInjection => write!(f, "XPath Injection"),
             AttackType::Ssrf => write!(f, "Server-Side Request Forgery"),
             AttackType::Deserialization => write!(f, "Insecure Deserialization"),
+            AttackType::DataLeakage => write!(f, "Data Leakage"),
         }
     }
 }
@@ -156,6 +159,8 @@ pub struct Rule {
     // Detection
     /// Regex pattern for detection
     pub pattern: Regex,
+    /// Raw pattern string (used for automata compilation)
+    pub pattern_str: String,
     /// Target locations to apply this rule
     pub targets: Vec<Target>,
 
@@ -323,6 +328,7 @@ impl RuleBuilder {
             confidence: self.confidence,
             paranoia_level: self.paranoia_level,
             pattern,
+            pattern_str: self.pattern,
             targets: self.targets,
             base_score: self.base_score,
             cve_ids: self.cve_ids,
