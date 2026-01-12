@@ -1,107 +1,201 @@
 # Roadmap
 
-## Current Status (v0.1.0)
+## Current Status (v0.5.0)
 
-The WAF agent is functional for **request inspection in buffer mode**. It correctly implements the `sentinel-agent-protocol` (v0.1.x) and can detect/block common web attacks in request headers and bodies.
+The WAF agent has evolved into a **next-generation Web Application and API Protection (WAAP)** platform with ML-powered detection, anomaly scoring, and enterprise-grade features.
 
 ### What Works
 
-- Request header inspection (path, query string, all headers)
-- Request body inspection (JSON, form data, all content types)
-- Response body inspection (reflected XSS, error leakage detection)
-- SQL injection, XSS, path traversal, command injection detection
-- Paranoia levels 1-4 for tuning sensitivity
+**Core Detection (200+ Rules)**
+- SQL injection (UNION, blind, time-based, stacked, NoSQL)
+- Cross-site scripting (reflected, stored, DOM-based, polyglot)
+- Path traversal and file inclusion (LFI/RFI)
+- Command injection (Unix, Windows, expression languages)
+- Server-side template injection (SSTI)
+- LDAP/XPath injection
+- SSRF detection
+- Insecure deserialization
+
+**Advanced Features**
+- Anomaly scoring with configurable thresholds
+- ML-based attack classification (character n-gram model)
+- Request fingerprinting and behavioral analysis
+- Payload similarity detection
+- Streaming body inspection with sliding window
+- Plugin architecture for extensibility
+- regex-automata DFA-based multi-pattern matching
+
+**API Security**
+- GraphQL introspection blocking and depth limits
+- JWT validation ("none" algorithm, weak algorithms, expiry)
+- JSON depth/complexity limits
+- NoSQL injection patterns
+
+**Bot Detection**
+- Scanner fingerprint detection
+- Behavioral analysis and timing anomalies
+- TLS fingerprinting support
+- Good bot verification
+
+**Enterprise Features**
+- Credential stuffing protection with breach checking
+- Sensitive data detection (credit cards, SSN, API keys)
+- Supply chain attack detection (SRI, crypto miners, Magecart)
+- Virtual patching (Log4Shell, Spring4Shell, Shellshock)
+- Threat intelligence integration (IP/domain reputation, IoC feeds)
+- Federated learning with differential privacy
+- Prometheus/OpenTelemetry metrics
+
+**Operational**
+- Request and response body inspection
+- Paranoia levels 1-4
 - Block mode and detect-only mode
 - Path exclusions
-- Configurable max body size (default 1MB)
+- Graceful shutdown and health checks
+- Production panic handling
 
 ### What Doesn't Work
 
-- Streaming mode (always buffers full body)
 - WebSocket frame inspection
-- Progressive/incremental decisions on large bodies
 - Body content modification (can only block/allow)
+- OpenAPI/GraphQL schema validation (pattern-based only)
+- Higher paranoia level rules (levels 2-4 have limited coverage)
 
 ---
 
-## Roadmap
+## Completed Milestones
 
 ### v0.2.0 - Response Inspection ✓
 
 **Status: Complete**
 
-Added response body inspection to detect attacks in server responses (e.g., reflected XSS, error message leakage).
-
 - [x] Implement `on_response_body_chunk()` handler
-- [x] Add `--response-inspection` flag (default: false for backward compat)
+- [x] Add `--response-inspection` flag
 - [x] Reuse existing detection rules for response bodies
 - [x] Add tests for response body inspection
 
-### v0.3.0 - Streaming Mode Support
-
-**Priority: High**
-
-Support streaming mode for memory efficiency on large request bodies.
-
-- [ ] Implement incremental body scanning (don't wait for `is_last`)
-- [ ] Support `needs_more` flag for progressive decisions
-- [ ] Add `--streaming-mode` flag (buffer | stream | hybrid)
-- [ ] Optimize memory usage for large bodies
-- [ ] Add benchmarks comparing buffer vs streaming performance
-
-### v0.4.0 - Integration Tests
+### v0.3.0 - Streaming Mode Support ✓
 
 **Status: Complete**
 
-Added integration tests using the sentinel-agent-protocol's AgentClient/AgentServer for end-to-end testing without requiring a full Sentinel proxy deployment.
+- [x] Implement streaming body inspection with sliding window
+- [x] Add `StreamingInspector` with overlap buffer for cross-chunk patterns
+- [x] Early termination on high anomaly scores
+- [x] Memory-efficient inspection (~1KB per request vs 1MB buffered)
 
-- [x] Create integration test harness using AgentClient/AgentServer
-- [x] Test SQL injection detection (query string, UNION SELECT, detect-only mode)
-- [x] Test XSS detection (script tags, event handlers, JavaScript URIs, headers)
-- [x] Test path traversal detection (plain and URL-encoded)
-- [x] Test command injection detection (backticks, pipes)
-- [x] Test path exclusion functionality
-- [x] Test request body inspection (single chunk, chunked, size limits)
-- [x] Test response body inspection
-- [x] Test scanner detection
-- [x] Test paranoia levels (level 1 vs level 2)
-- [x] Test clean requests pass through
-- [ ] Add CI workflow for integration tests (future)
+### v0.4.0 - Integration Tests ✓
 
-### v0.5.0 - WebSocket Support
+**Status: Complete**
 
-**Priority: Medium**
+- [x] Create integration test harness
+- [x] Test SQL injection detection (29 test cases)
+- [x] Test XSS detection
+- [x] Test path traversal detection
+- [x] Test command injection detection
+- [x] Test bot detection
+- [x] Test sensitive data detection
+- [x] Test false positive scenarios
+- [x] Add OWASP CRS compatibility tests (15 test cases)
+- [x] Add performance benchmarks (Criterion)
+
+### Next-Gen Phase 1: Foundation ✓
+
+**Status: Complete**
+
+- [x] Expand to 200+ high-quality detection rules
+- [x] Implement regex-automata DFA-based matching
+- [x] Add rule management (enable/disable, exclusions, overrides)
+- [x] Create plugin architecture (`WafPlugin` trait)
+
+### Next-Gen Phase 2: Intelligence ✓
+
+**Status: Complete**
+
+- [x] Anomaly scoring engine with severity/location weights
+- [x] ML-based attack classification
+- [x] Request fingerprinting and baseline learning
+- [x] Payload embedding similarity detection
+
+### Next-Gen Phase 3: Modern Threats ✓
+
+**Status: Complete**
+
+- [x] API security (GraphQL, JWT, JSON)
+- [x] Bot detection (signatures, behavior, timing)
+- [x] Credential stuffing protection
+- [x] Sensitive data detection
+- [x] Supply chain attack detection
+
+### Next-Gen Phase 4: Enterprise ✓
+
+**Status: Complete**
+
+- [x] Federated learning with differential privacy
+- [x] Virtual patching for CVEs
+- [x] Threat intelligence integration
+- [x] Advanced metrics (Prometheus, OpenTelemetry)
+- [x] Production hardening (panic hooks, health checks, graceful shutdown)
+
+---
+
+## Upcoming Roadmap
+
+### v0.6.0 - WebSocket Support
+
+**Priority: High**
 
 Add WebSocket frame inspection for detecting attacks in WebSocket traffic.
 
 - [ ] Implement `on_websocket_frame()` handler
-- [ ] Add WebSocket-specific detection rules (if applicable)
+- [ ] Add WebSocket-specific detection rules
 - [ ] Add `--websocket-inspection` flag
 - [ ] Add tests for WebSocket inspection
 
-### v0.6.0 - Advanced Features
+### v0.7.0 - CI/CD & Quality
 
-**Priority: Low**
+**Priority: High**
 
-- [ ] Body content modification (sanitize instead of block)
-- [ ] Custom rule support (user-defined regex patterns)
-- [ ] Rule exclusions by ID
-- [ ] JSON/XML-aware parsing for structured body inspection
-- [ ] Rate limiting integration (track repeat offenders)
+- [ ] Add GitHub Actions CI workflow
+- [ ] Automated testing on PR
+- [ ] Code coverage reporting
+- [ ] Automated releases
+
+### v0.8.0 - Paranoia Level Rules
+
+**Priority: Medium**
+
+Expand rule coverage for higher paranoia levels.
+
+- [ ] Paranoia level 2 rules (medium confidence)
+- [ ] Paranoia level 3 rules (low confidence)
+- [ ] Paranoia level 4 rules (maximum sensitivity)
+- [ ] Update CRS compatibility tests
+
+### v0.9.0 - Schema Validation
+
+**Priority: Medium**
+
+- [ ] OpenAPI specification parsing and validation
+- [ ] GraphQL schema validation
+- [ ] Request/response schema enforcement
+
+### v1.0.0 - Production Ready
+
+**Priority: High**
+
+- [ ] Performance optimization (<5ms p99 for 500 rules)
+- [ ] Memory optimization (<50MB steady state)
+- [ ] Production deployment documentation
+- [ ] Kubernetes manifests and Helm chart
 
 ---
 
 ## Non-Goals
 
-These are explicitly out of scope for this agent:
+These are explicitly out of scope:
 
-- **Full OWASP CRS compatibility** - We implement a useful subset (~20 rules), not the full 800+ ruleset. For full CRS, see [sentinel-agent-modsec](https://github.com/raskell-io/sentinel-agent-modsec)
-- **ModSecurity rule language (SecLang)** - We use native Rust regex patterns, not SecLang. For SecLang support, see [sentinel-agent-modsec](https://github.com/raskell-io/sentinel-agent-modsec)
-- **Learning mode / ML-based detection** - Keep it simple and deterministic
-
-## Related Projects
-
-- **[sentinel-agent-modsec](https://github.com/raskell-io/sentinel-agent-modsec)** - Full OWASP CRS WAF agent using libmodsecurity bindings. Use this when you need comprehensive protection with 800+ rules or existing SecLang rules.
+- **ModSecurity rule language (SecLang)** - We use native Rust patterns. For SecLang, see [sentinel-agent-modsec](https://github.com/raskell-io/sentinel-agent-modsec)
+- **Body content modification** - We block or allow, not sanitize
 
 ---
 
@@ -109,9 +203,7 @@ These are explicitly out of scope for this agent:
 
 | Sentinel Version | WAF Agent Version | Status |
 |------------------|-------------------|--------|
-| 0.1.x | 0.1.x | Supported |
-
-The agent depends on `sentinel-agent-protocol = "0.1"` and should remain compatible with any Sentinel 0.1.x release.
+| 0.1.x | 0.1.x - 0.5.x | Supported |
 
 ---
 
