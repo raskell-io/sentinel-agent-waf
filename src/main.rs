@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{error, info};
 
 use sentinel_agent_protocol::AgentServer;
-use sentinel_agent_waf::{WafAgent, WafConfig};
+use sentinel_agent_waf::{WafAgent, WafConfig, WebSocketConfig};
 
 /// Version information
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -70,6 +70,22 @@ struct Args {
     #[arg(long, default_value = "false", env = "WAF_RESPONSE_INSPECTION")]
     response_inspection: bool,
 
+    /// Enable WebSocket frame inspection
+    #[arg(long, default_value = "false", env = "WAF_WEBSOCKET_INSPECTION")]
+    websocket_inspection: bool,
+
+    /// Inspect WebSocket text frames
+    #[arg(long, default_value = "true", env = "WAF_WEBSOCKET_TEXT_FRAMES")]
+    websocket_text_frames: bool,
+
+    /// Inspect WebSocket binary frames
+    #[arg(long, default_value = "false", env = "WAF_WEBSOCKET_BINARY_FRAMES")]
+    websocket_binary_frames: bool,
+
+    /// Maximum WebSocket frame size to inspect (default 64KB)
+    #[arg(long, default_value = "65536", env = "WAF_WEBSOCKET_MAX_FRAME_SIZE")]
+    websocket_max_frame_size: usize,
+
     /// Enable verbose logging
     #[arg(short, long, env = "WAF_VERBOSE")]
     verbose: bool,
@@ -83,6 +99,14 @@ impl Args {
             .map(|p| p.split(',').map(|s| s.trim().to_string()).collect())
             .unwrap_or_default();
 
+        let websocket = WebSocketConfig {
+            enabled: self.websocket_inspection,
+            inspect_text_frames: self.websocket_text_frames,
+            inspect_binary_frames: self.websocket_binary_frames,
+            max_frame_size: self.websocket_max_frame_size,
+            ..Default::default()
+        };
+
         WafConfig {
             paranoia_level: self.paranoia_level.clamp(1, 4),
             sqli_enabled: self.sqli,
@@ -95,6 +119,7 @@ impl Args {
             body_inspection_enabled: self.body_inspection,
             max_body_size: self.max_body_size,
             response_inspection_enabled: self.response_inspection,
+            websocket,
             ..Default::default()
         }
     }
@@ -196,6 +221,7 @@ async fn main() -> Result<()> {
         block_mode = config.block_mode,
         body_inspection = config.body_inspection_enabled,
         response_inspection = config.response_inspection_enabled,
+        websocket_inspection = config.websocket.enabled,
         max_body_size = config.max_body_size,
         "Configuration loaded"
     );

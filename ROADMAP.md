@@ -1,6 +1,6 @@
 # Roadmap
 
-## Current Status (v0.5.0)
+## Current Status (v0.6.0)
 
 The WAF agent has evolved into a **next-generation Web Application and API Protection (WAAP)** platform with ML-powered detection, anomaly scoring, and enterprise-grade features.
 
@@ -48,6 +48,7 @@ The WAF agent has evolved into a **next-generation Web Application and API Prote
 
 **Operational**
 - Request and response body inspection
+- WebSocket frame inspection (text/binary, fragmented messages)
 - Paranoia levels 1-4
 - Block mode and detect-only mode
 - Path exclusions
@@ -56,7 +57,6 @@ The WAF agent has evolved into a **next-generation Web Application and API Prote
 
 ### What Doesn't Work
 
-- WebSocket frame inspection
 - Body content modification (can only block/allow)
 - OpenAPI/GraphQL schema validation (pattern-based only)
 - Higher paranoia level rules (levels 2-4 have limited coverage)
@@ -138,18 +138,25 @@ The WAF agent has evolved into a **next-generation Web Application and API Prote
 
 ---
 
+## Completed Milestones (continued)
+
+### v0.6.0 - WebSocket Support ✓
+
+**Status: Complete**
+
+Added WebSocket frame inspection for detecting attacks in WebSocket traffic.
+
+- [x] Implement `on_websocket_frame()` handler
+- [x] Add WebSocket configuration (`WebSocketConfig`)
+- [x] Add `--websocket-inspection` CLI flag
+- [x] Support fragmented message accumulation
+- [x] Add 27 WebSocket inspection tests
+- [x] Support text and binary frame inspection
+- [x] Detect-only and block modes
+
+---
+
 ## Upcoming Roadmap
-
-### v0.6.0 - WebSocket Support
-
-**Priority: High**
-
-Add WebSocket frame inspection for detecting attacks in WebSocket traffic.
-
-- [ ] Implement `on_websocket_frame()` handler
-- [ ] Add WebSocket-specific detection rules
-- [ ] Add `--websocket-inspection` flag
-- [ ] Add tests for WebSocket inspection
 
 ### v0.7.0 - CI/CD & Quality
 

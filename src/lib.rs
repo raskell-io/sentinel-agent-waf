@@ -42,7 +42,7 @@ pub mod supplychain;
 pub mod vpatching;
 
 // Re-exports for convenience
-pub use config::{ScoringConfig, WafConfig, WafConfigJson};
+pub use config::{ScoringConfig, WafConfig, WafConfigJson, WebSocketConfig};
 pub use detection::{AnomalyScore, Detection, WafDecision};
 pub use engine::WafEngine;
 pub use rules::{AttackType, Confidence, Rule, Severity};
@@ -56,7 +56,7 @@ use tracing::{debug, info, warn};
 
 use sentinel_agent_protocol::{
     AgentHandler, AgentResponse, AuditMetadata, ConfigureEvent, HeaderOp, RequestBodyChunkEvent,
-    RequestHeadersEvent, ResponseBodyChunkEvent, ResponseHeadersEvent,
+    RequestHeadersEvent, ResponseBodyChunkEvent, ResponseHeadersEvent, WebSocketFrameEvent,
 };
 
 /// Body accumulator for tracking in-progress bodies (buffered mode)
@@ -77,6 +77,42 @@ impl Default for BodyInspectionState {
     fn default() -> Self {
         BodyInspectionState::Buffered(BodyAccumulator::default())
     }
+}
+
+/// WebSocket message accumulator for fragmented messages
+///
+/// WebSocket messages can be split across multiple frames. This accumulator
+/// collects frames until the FIN bit is set, then inspects the complete message.
+#[derive(Debug, Default)]
+struct WebSocketMessageAccumulator {
+    /// Accumulated message data
+    data: Vec<u8>,
+    /// Opcode of the first frame (determines message type) - used for Debug
+    #[allow(dead_code)]
+    opcode: String,
+    /// Whether this is a client-to-server message - used for Debug
+    #[allow(dead_code)]
+    client_to_server: bool,
+    /// Number of frames accumulated
+    frame_count: u64,
+}
+
+impl WebSocketMessageAccumulator {
+    fn new(opcode: String, client_to_server: bool) -> Self {
+        Self {
+            data: Vec::new(),
+            opcode,
+            client_to_server,
+            frame_count: 0,
+        }
+    }
+}
+
+/// Key for tracking WebSocket messages (per connection + direction)
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+struct WebSocketKey {
+    correlation_id: String,
+    client_to_server: bool,
 }
 
 /// Health status for the WAF agent
@@ -112,6 +148,8 @@ pub struct WafAgent {
     engine: Arc<RwLock<WafEngine>>,
     pending_request_bodies: Arc<RwLock<HashMap<String, BodyInspectionState>>>,
     pending_response_bodies: Arc<RwLock<HashMap<String, BodyAccumulator>>>,
+    /// WebSocket message accumulators for fragmented messages
+    pending_websocket_messages: Arc<RwLock<HashMap<WebSocketKey, WebSocketMessageAccumulator>>>,
 }
 
 impl WafAgent {
@@ -122,6 +160,7 @@ impl WafAgent {
             engine: Arc::new(RwLock::new(engine)),
             pending_request_bodies: Arc::new(RwLock::new(HashMap::new())),
             pending_response_bodies: Arc::new(RwLock::new(HashMap::new())),
+            pending_websocket_messages: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 
@@ -598,6 +637,235 @@ impl AgentHandler for WafAgent {
         }
 
         AgentResponse::default_allow()
+    }
+
+    /// Handle WebSocket frame inspection
+    ///
+    /// Inspects WebSocket frames for attacks. Supports both single frames
+    /// and fragmented messages (accumulated until FIN bit is set).
+    async fn on_websocket_frame(&self, event: WebSocketFrameEvent) -> AgentResponse {
+        let engine = self.engine.read().await;
+
+        // Skip if WebSocket inspection is disabled
+        if !engine.config.websocket.enabled {
+            return AgentResponse::websocket_allow();
+        }
+
+        // Skip control frames (ping, pong, close) - they don't carry attack payloads
+        let opcode = event.opcode.to_lowercase();
+        if opcode == "ping" || opcode == "pong" || opcode == "close" {
+            debug!(
+                correlation_id = %event.correlation_id,
+                opcode = %event.opcode,
+                "Skipping control frame"
+            );
+            return AgentResponse::websocket_allow();
+        }
+
+        // Check frame type inspection settings
+        let is_text = opcode == "text" || opcode == "continuation";
+        let is_binary = opcode == "binary";
+
+        if is_text && !engine.config.websocket.inspect_text_frames {
+            return AgentResponse::websocket_allow();
+        }
+        if is_binary && !engine.config.websocket.inspect_binary_frames {
+            return AgentResponse::websocket_allow();
+        }
+
+        // Decode base64 frame data
+        let frame_data = match base64::engine::general_purpose::STANDARD.decode(&event.data) {
+            Ok(data) => data,
+            Err(e) => {
+                warn!(
+                    correlation_id = %event.correlation_id,
+                    error = %e,
+                    "Failed to decode WebSocket frame data"
+                );
+                return AgentResponse::websocket_allow();
+            }
+        };
+
+        // Check frame size limit
+        if frame_data.len() > engine.config.websocket.max_frame_size {
+            debug!(
+                correlation_id = %event.correlation_id,
+                frame_size = frame_data.len(),
+                max_size = engine.config.websocket.max_frame_size,
+                "WebSocket frame exceeds max size, skipping inspection"
+            );
+            return AgentResponse::websocket_allow();
+        }
+
+        // Handle fragmented messages
+        let data_to_inspect = if engine.config.websocket.accumulate_fragments && !event.fin {
+            // This is a fragment, accumulate it
+            let key = WebSocketKey {
+                correlation_id: event.correlation_id.clone(),
+                client_to_server: event.client_to_server,
+            };
+
+            let mut pending = self.pending_websocket_messages.write().await;
+            let accumulator = pending.entry(key).or_insert_with(|| {
+                WebSocketMessageAccumulator::new(event.opcode.clone(), event.client_to_server)
+            });
+
+            // Check accumulated size
+            if accumulator.data.len() + frame_data.len() > engine.config.websocket.max_message_size {
+                warn!(
+                    correlation_id = %event.correlation_id,
+                    accumulated_size = accumulator.data.len(),
+                    frame_size = frame_data.len(),
+                    max_size = engine.config.websocket.max_message_size,
+                    "WebSocket message exceeds max size, dropping"
+                );
+                pending.remove(&WebSocketKey {
+                    correlation_id: event.correlation_id.clone(),
+                    client_to_server: event.client_to_server,
+                });
+
+                if engine.config.websocket.block_mode {
+                    return AgentResponse::websocket_close(
+                        engine.config.websocket.block_close_code,
+                        engine.config.websocket.block_close_reason.clone(),
+                    );
+                } else {
+                    return AgentResponse::websocket_drop();
+                }
+            }
+
+            accumulator.data.extend(&frame_data);
+            accumulator.frame_count += 1;
+
+            debug!(
+                correlation_id = %event.correlation_id,
+                frame_index = event.frame_index,
+                accumulated_frames = accumulator.frame_count,
+                accumulated_size = accumulator.data.len(),
+                "Accumulated WebSocket fragment"
+            );
+
+            // Not the final frame, don't inspect yet
+            return AgentResponse::websocket_allow();
+        } else if engine.config.websocket.accumulate_fragments && event.fin {
+            // Final frame, get accumulated data if any
+            let key = WebSocketKey {
+                correlation_id: event.correlation_id.clone(),
+                client_to_server: event.client_to_server,
+            };
+
+            let mut pending = self.pending_websocket_messages.write().await;
+            if let Some(mut accumulator) = pending.remove(&key) {
+                // Add final frame data
+                accumulator.data.extend(&frame_data);
+                accumulator.data
+            } else {
+                // Single frame message (no prior fragments)
+                frame_data
+            }
+        } else {
+            // Not accumulating, inspect each frame individually
+            frame_data
+        };
+
+        // Convert to string for inspection (lossy for binary)
+        let payload_str = String::from_utf8_lossy(&data_to_inspect);
+
+        // Determine location for scoring
+        let direction = if event.client_to_server { "c2s" } else { "s2c" };
+        let location = format!("websocket:{}:{}", direction, event.opcode);
+
+        debug!(
+            correlation_id = %event.correlation_id,
+            frame_index = event.frame_index,
+            direction = direction,
+            opcode = %event.opcode,
+            payload_size = data_to_inspect.len(),
+            "Inspecting WebSocket frame"
+        );
+
+        // Run detection
+        let detections = engine.check(&payload_str, &location);
+
+        if detections.is_empty() {
+            return AgentResponse::websocket_allow();
+        }
+
+        // Calculate decision using scoring
+        let decision = scoring::decide(
+            &detections,
+            engine.rules(),
+            &engine.config.scoring,
+            engine.config.websocket.block_mode,
+        );
+
+        // Log detections
+        for detection in &detections {
+            let level = if decision.is_block() { "BLOCK" } else { "DETECT" };
+            warn!(
+                correlation_id = %event.correlation_id,
+                rule_id = detection.rule_id,
+                rule_name = %detection.rule_name,
+                attack_type = %detection.attack_type,
+                location = %detection.location,
+                matched = %detection.matched_value,
+                level = level,
+                direction = direction,
+                "WAF detection in WebSocket frame"
+            );
+        }
+
+        if decision.is_block() {
+            let rule_ids: Vec<String> = detections.iter().map(|d| d.rule_id.to_string()).collect();
+            let first_rule = detections.first().map(|d| d.rule_id).unwrap_or(0);
+            let attack_type = detections
+                .first()
+                .map(|d| d.attack_type.to_string())
+                .unwrap_or_default();
+
+            info!(
+                correlation_id = %event.correlation_id,
+                detections = detections.len(),
+                first_rule = first_rule,
+                attack_type = %attack_type,
+                "WebSocket frame blocked"
+            );
+
+            // Close connection for blocked attacks
+            AgentResponse::websocket_close(
+                engine.config.websocket.block_close_code,
+                format!(
+                    "{}: rule {} ({})",
+                    engine.config.websocket.block_close_reason,
+                    first_rule,
+                    attack_type
+                ),
+            )
+            .with_audit(AuditMetadata {
+                tags: vec![
+                    "waf".to_string(),
+                    "blocked".to_string(),
+                    "websocket".to_string(),
+                    direction.to_string(),
+                ],
+                rule_ids,
+                ..Default::default()
+            })
+        } else {
+            // Detection below threshold, allow but log
+            let rule_ids: Vec<String> = detections.iter().map(|d| d.rule_id.to_string()).collect();
+
+            AgentResponse::websocket_allow().with_audit(AuditMetadata {
+                tags: vec![
+                    "waf".to_string(),
+                    "detected".to_string(),
+                    "websocket".to_string(),
+                    direction.to_string(),
+                ],
+                rule_ids,
+                ..Default::default()
+            })
+        }
     }
 }
 

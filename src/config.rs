@@ -59,6 +59,73 @@ pub struct WafConfig {
     pub metrics: MetricsConfig,
     /// Federated learning configuration
     pub federated: FederatedConfig,
+    /// WebSocket inspection configuration
+    pub websocket: WebSocketConfig,
+}
+
+/// Configuration for WebSocket frame inspection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct WebSocketConfig {
+    /// Enable WebSocket frame inspection
+    #[serde(default)]
+    pub enabled: bool,
+    /// Inspect text frames
+    #[serde(default = "default_true")]
+    pub inspect_text_frames: bool,
+    /// Inspect binary frames
+    #[serde(default)]
+    pub inspect_binary_frames: bool,
+    /// Maximum frame size to inspect (bytes)
+    #[serde(default = "default_max_ws_frame_size")]
+    pub max_frame_size: usize,
+    /// Block mode for WebSocket (true = close connection, false = log only)
+    #[serde(default = "default_true")]
+    pub block_mode: bool,
+    /// Accumulate fragmented messages before inspection
+    #[serde(default = "default_true")]
+    pub accumulate_fragments: bool,
+    /// Maximum accumulated message size for fragmented messages
+    #[serde(default = "default_max_ws_message_size")]
+    pub max_message_size: usize,
+    /// Close code to use when blocking (RFC 6455)
+    #[serde(default = "default_ws_close_code")]
+    pub block_close_code: u16,
+    /// Close reason to use when blocking
+    #[serde(default = "default_ws_close_reason")]
+    pub block_close_reason: String,
+}
+
+impl Default for WebSocketConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            inspect_text_frames: true,
+            inspect_binary_frames: false,
+            max_frame_size: 65536, // 64KB
+            block_mode: true,
+            accumulate_fragments: true,
+            max_message_size: 1048576, // 1MB
+            block_close_code: 1008, // Policy Violation
+            block_close_reason: "WAF policy violation".to_string(),
+        }
+    }
+}
+
+fn default_max_ws_frame_size() -> usize {
+    65536 // 64KB
+}
+
+fn default_max_ws_message_size() -> usize {
+    1048576 // 1MB
+}
+
+fn default_ws_close_code() -> u16 {
+    1008 // Policy Violation
+}
+
+fn default_ws_close_reason() -> String {
+    "WAF policy violation".to_string()
 }
 
 /// Configuration for API security inspection
@@ -495,6 +562,8 @@ impl Default for WafConfig {
             supply_chain: SupplyChainConfig::default(),
             metrics: MetricsConfig::default(),
             federated: FederatedConfig::default(),
+            // v0.6.0: WebSocket inspection
+            websocket: WebSocketConfig::default(),
         }
     }
 }
@@ -608,6 +677,9 @@ pub struct LocationWeights {
     /// Body multiplier
     #[serde(default = "default_body_weight")]
     pub body: f32,
+    /// WebSocket frame multiplier
+    #[serde(default = "default_websocket_weight")]
+    pub websocket: f32,
 }
 
 impl Default for LocationWeights {
@@ -618,8 +690,13 @@ impl Default for LocationWeights {
             header: 1.0,
             cookie: 1.3,
             body: 1.2,
+            websocket: 1.4, // Higher than body, WebSocket can be dangerous
         }
     }
+}
+
+fn default_websocket_weight() -> f32 {
+    1.4
 }
 
 impl LocationWeights {
@@ -635,6 +712,8 @@ impl LocationWeights {
             self.cookie
         } else if location == "body" || location == "response_body" {
             self.body
+        } else if location.starts_with("websocket") {
+            self.websocket
         } else {
             1.0
         }
@@ -813,6 +892,9 @@ pub struct WafConfigJson {
     pub metrics: Option<MetricsConfig>,
     #[serde(default)]
     pub federated: Option<FederatedConfig>,
+    // v0.6.0: WebSocket inspection
+    #[serde(default)]
+    pub websocket: Option<WebSocketConfig>,
 }
 
 fn default_paranoia() -> u8 {
@@ -883,6 +965,8 @@ impl From<WafConfigJson> for WafConfig {
             supply_chain: json.supply_chain.unwrap_or_default(),
             metrics: json.metrics.unwrap_or_default(),
             federated: json.federated.unwrap_or_default(),
+            // v0.6.0: WebSocket inspection
+            websocket: json.websocket.unwrap_or_default(),
         }
     }
 }
