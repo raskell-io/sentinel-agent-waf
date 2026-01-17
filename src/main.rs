@@ -1,6 +1,7 @@
 //! Sentinel WAF Agent CLI
 //!
 //! Command-line interface for the Web Application Firewall agent.
+//! Supports both Unix Domain Socket (v1 compatibility) and gRPC (v2) transports.
 
 use anyhow::Result;
 use clap::Parser;
@@ -9,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{error, info};
 
 use sentinel_agent_protocol::AgentServer;
+use sentinel_agent_protocol::v2::GrpcAgentServerV2;
 use sentinel_agent_waf::{WafAgent, WafConfig, WebSocketConfig};
 
 /// Version information
@@ -17,14 +19,29 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Global shutdown flag for graceful termination
 static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 
+/// Transport mode for the agent
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TransportMode {
+    /// Unix Domain Socket (v1 protocol compatibility)
+    Uds,
+    /// gRPC over TCP (v2 protocol)
+    Grpc,
+}
+
 /// Command line arguments
 #[derive(Parser, Debug)]
 #[command(name = "sentinel-waf-agent")]
 #[command(about = "Web Application Firewall agent for Sentinel reverse proxy")]
+#[command(version = VERSION)]
 struct Args {
-    /// Path to Unix socket
+    /// Path to Unix socket (UDS transport)
     #[arg(long, default_value = "/tmp/sentinel-waf.sock", env = "AGENT_SOCKET")]
     socket: PathBuf,
+
+    /// gRPC server address (e.g., "0.0.0.0:50051")
+    /// When specified, the agent uses gRPC transport with v2 protocol
+    #[arg(long, env = "AGENT_GRPC_ADDRESS")]
+    grpc_address: Option<String>,
 
     /// Paranoia level (1-4, higher = more strict)
     #[arg(long, default_value = "1", env = "WAF_PARANOIA_LEVEL")]
@@ -123,6 +140,14 @@ impl Args {
             ..Default::default()
         }
     }
+
+    fn transport_mode(&self) -> TransportMode {
+        if self.grpc_address.is_some() {
+            TransportMode::Grpc
+        } else {
+            TransportMode::Uds
+        }
+    }
 }
 
 /// Install panic hook for production diagnostics
@@ -133,7 +158,7 @@ fn install_panic_hook() {
         let payload = panic_info
             .payload()
             .downcast_ref::<&str>()
-            .map(|s| *s)
+            .copied()
             .or_else(|| panic_info.payload().downcast_ref::<String>().map(|s| s.as_str()))
             .unwrap_or("Unknown panic payload");
 
@@ -182,6 +207,58 @@ fn setup_signal_handlers() {
     });
 }
 
+/// Run the agent with UDS transport (v1 compatibility)
+async fn run_uds_server(agent: WafAgent, socket_path: PathBuf) -> Result<()> {
+    info!(
+        socket = ?socket_path,
+        transport = "uds",
+        protocol = "v1",
+        "Starting WAF agent with UDS transport"
+    );
+
+    let server = AgentServer::new("sentinel-waf-agent", socket_path, Box::new(agent));
+
+    match server.run().await {
+        Ok(()) => {
+            info!("WAF agent shutdown complete (UDS)");
+            Ok(())
+        }
+        Err(e) => {
+            error!(error = %e, "WAF agent server error (UDS)");
+            Err(anyhow::anyhow!("UDS server error: {}", e))
+        }
+    }
+}
+
+/// Run the agent with gRPC transport (v2 protocol)
+async fn run_grpc_server(agent: WafAgent, address: String) -> Result<()> {
+    let addr: std::net::SocketAddr = address.parse().map_err(|e| {
+        error!(address = %address, error = %e, "Invalid gRPC address");
+        anyhow::anyhow!("Invalid gRPC address '{}': {}", address, e)
+    })?;
+
+    info!(
+        address = %addr,
+        transport = "grpc",
+        protocol = "v2",
+        "Starting WAF agent with gRPC transport"
+    );
+
+    // Wrap agent in Arc for the gRPC server (it takes Box<dyn AgentHandlerV2>)
+    let server = GrpcAgentServerV2::new("sentinel-waf-agent", Box::new(agent));
+
+    match server.run(addr).await {
+        Ok(()) => {
+            info!("WAF agent shutdown complete (gRPC)");
+            Ok(())
+        }
+        Err(e) => {
+            error!(error = %e, "WAF agent server error (gRPC)");
+            Err(anyhow::anyhow!("gRPC server error: {}", e))
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // Install panic hook first for early crash diagnostics
@@ -211,6 +288,7 @@ async fn main() -> Result<()> {
 
     // Build configuration
     let config = args.to_config();
+    let transport = args.transport_mode();
 
     info!(
         paranoia_level = config.paranoia_level,
@@ -223,6 +301,7 @@ async fn main() -> Result<()> {
         response_inspection = config.response_inspection_enabled,
         websocket_inspection = config.websocket.enabled,
         max_body_size = config.max_body_size,
+        transport = ?transport,
         "Configuration loaded"
     );
 
@@ -232,22 +311,14 @@ async fn main() -> Result<()> {
         e
     })?;
 
-    info!(
-        socket = ?args.socket,
-        "WAF agent initialized successfully, starting server"
-    );
+    info!("WAF agent initialized successfully");
 
-    // Start agent server
-    let server = AgentServer::new("sentinel-waf-agent", args.socket, Box::new(agent));
-
-    match server.run().await {
-        Ok(()) => {
-            info!("WAF agent shutdown complete");
-            Ok(())
-        }
-        Err(e) => {
-            error!(error = %e, "WAF agent server error");
-            Err(anyhow::anyhow!("Server error: {}", e))
+    // Start the appropriate server based on transport mode
+    match transport {
+        TransportMode::Uds => run_uds_server(agent, args.socket).await,
+        TransportMode::Grpc => {
+            let address = args.grpc_address.expect("gRPC address should be set");
+            run_grpc_server(agent, address).await
         }
     }
 }

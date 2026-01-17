@@ -57,7 +57,16 @@ use tracing::{debug, info, warn};
 use sentinel_agent_protocol::{
     AgentHandler, AgentResponse, AuditMetadata, ConfigureEvent, HeaderOp, RequestBodyChunkEvent,
     RequestHeadersEvent, ResponseBodyChunkEvent, ResponseHeadersEvent, WebSocketFrameEvent,
+    EventType,
 };
+
+// v2 protocol types
+use sentinel_agent_protocol::v2::{
+    AgentCapabilities, AgentFeatures, AgentHandlerV2, CounterMetric, DrainReason, GaugeMetric,
+    HealthStatus as V2HealthStatus, MetricsReport, ShutdownReason,
+};
+
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Body accumulator for tracking in-progress bodies (buffered mode)
 #[derive(Debug, Default)]
@@ -143,6 +152,34 @@ impl HealthStatus {
     }
 }
 
+/// Metrics counters for v2 protocol reporting
+#[derive(Debug, Default)]
+pub struct WafMetrics {
+    /// Total requests processed
+    pub requests_total: AtomicU64,
+    /// Total requests blocked
+    pub blocks_total: AtomicU64,
+    /// Total detections by attack type
+    pub detections_sqli: AtomicU64,
+    pub detections_xss: AtomicU64,
+    pub detections_path_traversal: AtomicU64,
+    pub detections_command_injection: AtomicU64,
+    pub detections_other: AtomicU64,
+}
+
+impl WafMetrics {
+    /// Increment detection counter by attack type
+    fn increment_detection(&self, attack_type: &AttackType) {
+        match attack_type {
+            AttackType::SqlInjection => self.detections_sqli.fetch_add(1, Ordering::Relaxed),
+            AttackType::Xss => self.detections_xss.fetch_add(1, Ordering::Relaxed),
+            AttackType::PathTraversal => self.detections_path_traversal.fetch_add(1, Ordering::Relaxed),
+            AttackType::CommandInjection => self.detections_command_injection.fetch_add(1, Ordering::Relaxed),
+            _ => self.detections_other.fetch_add(1, Ordering::Relaxed),
+        };
+    }
+}
+
 /// WAF agent implementing the Sentinel agent protocol
 pub struct WafAgent {
     engine: Arc<RwLock<WafEngine>>,
@@ -150,6 +187,8 @@ pub struct WafAgent {
     pending_response_bodies: Arc<RwLock<HashMap<String, BodyAccumulator>>>,
     /// WebSocket message accumulators for fragmented messages
     pending_websocket_messages: Arc<RwLock<HashMap<WebSocketKey, WebSocketMessageAccumulator>>>,
+    /// Metrics counters for v2 protocol reporting
+    metrics: Arc<WafMetrics>,
 }
 
 impl WafAgent {
@@ -161,6 +200,7 @@ impl WafAgent {
             pending_request_bodies: Arc::new(RwLock::new(HashMap::new())),
             pending_response_bodies: Arc::new(RwLock::new(HashMap::new())),
             pending_websocket_messages: Arc::new(RwLock::new(HashMap::new())),
+            metrics: Arc::new(WafMetrics::default()),
         })
     }
 
@@ -230,6 +270,9 @@ impl WafAgent {
         detections: Vec<Detection>,
         location_type: &str,
     ) -> (WafDecision, Vec<Detection>) {
+        // Track metrics - increment request counter
+        self.metrics.requests_total.fetch_add(1, Ordering::Relaxed);
+
         if detections.is_empty() {
             return (WafDecision::Allow, detections);
         }
@@ -240,6 +283,16 @@ impl WafAgent {
             &engine.config.scoring,
             engine.config.block_mode,
         );
+
+        // Track detection metrics by attack type
+        for detection in &detections {
+            self.metrics.increment_detection(&detection.attack_type);
+        }
+
+        // Track block metrics
+        if decision.is_block() {
+            self.metrics.blocks_total.fetch_add(1, Ordering::Relaxed);
+        }
 
         // Log detections
         for detection in &detections {
@@ -866,6 +919,178 @@ impl AgentHandler for WafAgent {
                 ..Default::default()
             })
         }
+    }
+}
+
+/// Version from Cargo.toml
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[async_trait::async_trait]
+impl AgentHandlerV2 for WafAgent {
+    /// Get agent capabilities for v2 protocol handshake
+    fn capabilities(&self) -> AgentCapabilities {
+        AgentCapabilities::new("sentinel-waf-agent", "Sentinel WAF Agent", VERSION)
+            .with_event(EventType::RequestHeaders)
+            .with_event(EventType::RequestBodyChunk)
+            .with_event(EventType::ResponseHeaders)
+            .with_event(EventType::ResponseBodyChunk)
+            .with_event(EventType::WebSocketFrame)
+            .with_event(EventType::Configure)
+            .with_features(AgentFeatures {
+                streaming_body: true,
+                websocket: true,
+                config_push: true,
+                metrics_export: true,
+                health_reporting: true,
+                cancellation: true,
+                concurrent_requests: 100,
+                flow_control: false,
+                guardrails: false,
+            })
+    }
+
+    /// Get current health status for v2 protocol
+    fn health_status(&self) -> V2HealthStatus {
+        // Use tokio::runtime::Handle::try_current to check if we're in async context
+        // For health check, we do a simple sync check
+        V2HealthStatus::healthy("sentinel-waf-agent")
+    }
+
+    /// Get current metrics report for v2 protocol
+    fn metrics_report(&self) -> Option<MetricsReport> {
+        let mut report = MetricsReport::new("sentinel-waf-agent", 10_000);
+
+        // Add counter metrics
+        report.counters.push(CounterMetric::new(
+            "waf_requests_total",
+            self.metrics.requests_total.load(Ordering::Relaxed),
+        ));
+        report.counters.push(CounterMetric::new(
+            "waf_blocks_total",
+            self.metrics.blocks_total.load(Ordering::Relaxed),
+        ));
+
+        // Add detection counters by attack type
+        let mut sqli_counter = CounterMetric::new(
+            "waf_detections_total",
+            self.metrics.detections_sqli.load(Ordering::Relaxed),
+        );
+        sqli_counter.labels.insert("attack_type".to_string(), "sqli".to_string());
+        report.counters.push(sqli_counter);
+
+        let mut xss_counter = CounterMetric::new(
+            "waf_detections_total",
+            self.metrics.detections_xss.load(Ordering::Relaxed),
+        );
+        xss_counter.labels.insert("attack_type".to_string(), "xss".to_string());
+        report.counters.push(xss_counter);
+
+        let mut path_traversal_counter = CounterMetric::new(
+            "waf_detections_total",
+            self.metrics.detections_path_traversal.load(Ordering::Relaxed),
+        );
+        path_traversal_counter.labels.insert("attack_type".to_string(), "path_traversal".to_string());
+        report.counters.push(path_traversal_counter);
+
+        let mut cmd_injection_counter = CounterMetric::new(
+            "waf_detections_total",
+            self.metrics.detections_command_injection.load(Ordering::Relaxed),
+        );
+        cmd_injection_counter.labels.insert("attack_type".to_string(), "command_injection".to_string());
+        report.counters.push(cmd_injection_counter);
+
+        let mut other_counter = CounterMetric::new(
+            "waf_detections_total",
+            self.metrics.detections_other.load(Ordering::Relaxed),
+        );
+        other_counter.labels.insert("attack_type".to_string(), "other".to_string());
+        report.counters.push(other_counter);
+
+        // Add gauge for current score (placeholder - would need to track per-request)
+        report.gauges.push(GaugeMetric::new("waf_current_score", 0.0));
+
+        Some(report)
+    }
+
+    /// Handle a configuration update from the proxy (v2 protocol)
+    async fn on_configure(&self, config: serde_json::Value, version: Option<String>) -> bool {
+        info!(config_version = ?version, "Received v2 configuration update");
+        debug!(config = ?config, "Configuration content");
+
+        // Parse the JSON config
+        let json_config: WafConfigJson = match serde_json::from_value::<WafConfigJson>(config.clone()) {
+            Ok(c) => c,
+            Err(e) => {
+                warn!(error = %e, "Failed to parse WAF configuration");
+                return false;
+            }
+        };
+
+        // Convert to WafConfig and reconfigure
+        let new_config: WafConfig = json_config.into();
+        info!(
+            paranoia_level = new_config.paranoia_level,
+            sqli = new_config.sqli_enabled,
+            xss = new_config.xss_enabled,
+            block_mode = new_config.block_mode,
+            "Applying WAF configuration"
+        );
+
+        match self.reconfigure(new_config).await {
+            Ok(()) => {
+                info!("WAF agent reconfigured successfully via v2 protocol");
+                true
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to reconfigure WAF engine");
+                false
+            }
+        }
+    }
+
+    /// Handle a shutdown request from the proxy
+    async fn on_shutdown(&self, reason: ShutdownReason, grace_period_ms: u64) {
+        info!(
+            reason = ?reason,
+            grace_period_ms = grace_period_ms,
+            "Received shutdown request"
+        );
+        // Clean up pending bodies
+        self.pending_request_bodies.write().await.clear();
+        self.pending_response_bodies.write().await.clear();
+        self.pending_websocket_messages.write().await.clear();
+    }
+
+    /// Handle a drain request from the proxy
+    async fn on_drain(&self, duration_ms: u64, reason: DrainReason) {
+        info!(
+            reason = ?reason,
+            duration_ms = duration_ms,
+            "Received drain request - stopping acceptance of new requests"
+        );
+        // In drain mode, we continue processing existing requests but don't accept new ones
+        // The proxy handles this at the transport level
+    }
+
+    // Forward event handlers to the v1 implementation
+    async fn on_request_headers(&self, event: RequestHeadersEvent) -> AgentResponse {
+        <Self as AgentHandler>::on_request_headers(self, event).await
+    }
+
+    async fn on_request_body_chunk(&self, event: RequestBodyChunkEvent) -> AgentResponse {
+        <Self as AgentHandler>::on_request_body_chunk(self, event).await
+    }
+
+    async fn on_response_headers(&self, event: ResponseHeadersEvent) -> AgentResponse {
+        <Self as AgentHandler>::on_response_headers(self, event).await
+    }
+
+    async fn on_response_body_chunk(&self, event: ResponseBodyChunkEvent) -> AgentResponse {
+        <Self as AgentHandler>::on_response_body_chunk(self, event).await
+    }
+
+    async fn on_websocket_frame(&self, event: WebSocketFrameEvent) -> AgentResponse {
+        <Self as AgentHandler>::on_websocket_frame(self, event).await
     }
 }
 
