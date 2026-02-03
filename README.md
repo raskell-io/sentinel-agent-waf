@@ -1,10 +1,10 @@
 # Sentinel WAF Agent
 
-A next-generation Web Application Firewall agent for [Sentinel](https://github.com/raskell-io/sentinel) reverse proxy. Built in **pure Rust** with no C dependencies, featuring ML-powered detection, anomaly scoring, and enterprise-grade protection.
+A next-generation Web Application Firewall agent for [Sentinel](https://github.com/raskell-io/sentinel) reverse proxy. Built in **pure Rust** with no C dependencies, featuring heuristic anomaly detection with n-gram analysis, anomaly scoring, and 285 detection rules.
 
 ## Features
 
-### Core Detection (200+ Rules)
+### Core Detection (285 Rules)
 - **SQL Injection** - UNION, blind, time-based, stacked queries, NoSQL
 - **Cross-Site Scripting (XSS)** - Reflected, stored, DOM-based, polyglot
 - **Path Traversal** - Directory traversal, LFI, RFI
@@ -22,17 +22,17 @@ A next-generation Web Application Firewall agent for [Sentinel](https://github.c
 - **Supply Chain Protection** - SRI validation, crypto miner detection, Magecart patterns
 
 ### Enterprise Features
-- **Threat Intelligence** - IP/domain reputation, IoC feeds, Tor exit node detection
+- **Threat Intelligence** - IP/domain reputation framework, Tor exit node detection (requires feed configuration)
 - **Virtual Patching** - Built-in CVE signatures (Log4Shell, Spring4Shell, Shellshock)
 - **Advanced Analytics** - Prometheus/OpenTelemetry metrics, latency histograms
-- **Federated Learning** - Privacy-preserving distributed model training
+- **Federated Learning** - Privacy-preserving distributed gradient averaging (experimental)
 
 ### Performance
 - **Anomaly Scoring** - Cumulative risk scores instead of binary block/allow
-- **ML Classification** - Character n-gram based attack detection
+- **Statistical Classification** - Character n-gram based payload fingerprinting
 - **Regex Automata** - DFA-based multi-pattern matching for O(n) scanning
 - **Streaming Inspection** - Constant memory body inspection with sliding window
-- **Plugin Architecture** - Extensible rule and detection system
+- **Plugin Traits** - Compile-time extensible detection and scoring
 
 ## Installation
 
@@ -305,6 +305,8 @@ X-WAF-Score: 15
 
 ## Performance Benchmarks
 
+> Measured with Criterion. Run `cargo bench` to reproduce on your hardware.
+
 | Metric | Target | Actual |
 |--------|--------|--------|
 | Rule matching (1KB input) | <5ms | ~2ms |
@@ -353,8 +355,8 @@ cargo clippy
 
 | Feature | sentinel-agent-waf | ModSecurity CRS |
 |---------|-------------------|-----------------|
-| Detection Rules | 200+ | 800+ |
-| ML Detection | ✓ | ✗ |
+| Detection Rules | 285 | 800+ |
+| Statistical Detection | ✓ | ✗ |
 | Anomaly Scoring | ✓ | ✓ |
 | API Security | ✓ (GraphQL, JWT) | Basic |
 | Bot Detection | ✓ (behavioral) | UA only |
@@ -375,8 +377,8 @@ cargo clippy
 ┌─────────────────────────────────────────────────────────────┐
 │                  WAF Agent                                  │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
-│  │  Automata   │  │     ML      │  │    Threat Intel     │  │
-│  │   Engine    │  │  Classifier │  │      Engine         │  │
+│  │  Automata   │  │  Statistical │  │    Threat Intel     │  │
+│  │   Engine    │  │  Classifier  │  │      Engine         │  │
 │  └──────┬──────┘  └──────┬──────┘  └──────────┬──────────┘  │
 │         │                │                     │            │
 │         └────────────────┼─────────────────────┘            │
