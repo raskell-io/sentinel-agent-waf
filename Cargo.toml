@@ -1,30 +1,30 @@
 [package]
-name = "sentinel-agent-waf"
+name = "zentinel-agent-waf"
 version = "0.2.0"
 edition = "2021"
 rust-version = "1.75"
-authors = ["Sentinel Contributors"]
+authors = ["Zentinel Contributors"]
 license = "Apache-2.0"
-repository = "https://github.com/raskell-io/sentinel-agent-waf"
-homepage = "https://sentinel.raskell.io"
-documentation = "https://sentinel.raskell.io/docs/agents/waf"
-description = "Web Application Firewall agent for Sentinel reverse proxy - SQL injection, XSS, and attack detection"
+repository = "https://github.com/zentinelproxy/zentinel-agent-waf"
+homepage = "https://zentinelproxy.io"
+documentation = "https://zentinelproxy.io/docs/agents/waf"
+description = "Web Application Firewall agent for Zentinel reverse proxy - SQL injection, XSS, and attack detection"
 keywords = ["proxy", "reverse-proxy", "agent", "waf", "security"]
 categories = ["network-programming"]
 readme = "README.md"
 
 [lib]
-name = "sentinel_agent_waf"
+name = "zentinel_agent_waf"
 path = "src/lib.rs"
 
 [[bin]]
-name = "sentinel-waf-agent"
+name = "zentinel-waf-agent"
 path = "src/main.rs"
 
 [dependencies]
-# Sentinel protocol
-sentinel-agent-protocol = "0.3"
-sentinel-common = "0.3"
+# Zentinel protocol
+zentinel-agent-protocol = "0.3"
+zentinel-common = "0.3"
 
 # Async runtime
 tokio = { version = "1.40", features = ["full"] }

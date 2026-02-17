@@ -1,14 +1,14 @@
-# Sentinel WAF: Next-Generation Roadmap
+# Zentinel WAF: Next-Generation Roadmap
 
 ## Status: ✅ COMPLETE
 
-All four phases of the next-generation roadmap have been implemented. The sentinel-agent-waf has been transformed from a lightweight rule-based WAF into a **next-generation Web Application and API Protection (WAAP)** platform.
+All four phases of the next-generation roadmap have been implemented. The zentinel-agent-waf has been transformed from a lightweight rule-based WAF into a **next-generation Web Application and API Protection (WAAP)** platform.
 
 ---
 
 ## Vision (Achieved)
 
-Transform sentinel-agent-waf from a lightweight rule-based WAF into a **next-generation Web Application and API Protection (WAAP)** platform that surpasses OWASP ModSecurity CRS through:
+Transform zentinel-agent-waf from a lightweight rule-based WAF into a **next-generation Web Application and API Protection (WAAP)** platform that surpasses OWASP ModSecurity CRS through:
 
 1. ✅ **Superior Performance** - Pure Rust with zero C dependencies
 2. ✅ **Intelligent Detection** - ML-powered threat identification
@@ -20,7 +20,7 @@ Transform sentinel-agent-waf from a lightweight rule-based WAF into a **next-gen
 
 ## Current State vs ModSecurity CRS
 
-| Aspect | sentinel-agent-waf | ModSecurity CRS |
+| Aspect | zentinel-agent-waf | ModSecurity CRS |
 |--------|-------------------|-----------------|
 | Rules | 200+ | 800+ |
 | Binary Size | ~6 MB | ~50 MB |

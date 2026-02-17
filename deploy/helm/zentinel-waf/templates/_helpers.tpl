@@ -1,14 +1,14 @@
 {{/*
 Expand the name of the chart.
 */}}
-{{- define "sentinel-waf.name" -}}
+{{- define "zentinel-waf.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Create a default fully qualified app name.
 */}}
-{{- define "sentinel-waf.fullname" -}}
+{{- define "zentinel-waf.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
@@ -24,28 +24,28 @@ Create a default fully qualified app name.
 {{/*
 Create chart name and version as used by the chart label.
 */}}
-{{- define "sentinel-waf.chart" -}}
+{{- define "zentinel-waf.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Common labels
 */}}
-{{- define "sentinel-waf.labels" -}}
-helm.sh/chart: {{ include "sentinel-waf.chart" . }}
-{{ include "sentinel-waf.selectorLabels" . }}
+{{- define "zentinel-waf.labels" -}}
+helm.sh/chart: {{ include "zentinel-waf.chart" . }}
+{{ include "zentinel-waf.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
-app.kubernetes.io/part-of: sentinel
+app.kubernetes.io/part-of: zentinel
 {{- end }}
 
 {{/*
 Selector labels
 */}}
-{{- define "sentinel-waf.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "sentinel-waf.name" . }}
+{{- define "zentinel-waf.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "zentinel-waf.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/component: waf
 {{- end }}
@@ -53,9 +53,9 @@ app.kubernetes.io/component: waf
 {{/*
 Create the name of the service account to use
 */}}
-{{- define "sentinel-waf.serviceAccountName" -}}
+{{- define "zentinel-waf.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create }}
-{{- default (include "sentinel-waf.fullname" .) .Values.serviceAccount.name }}
+{{- default (include "zentinel-waf.fullname" .) .Values.serviceAccount.name }}
 {{- else }}
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
@@ -64,6 +64,6 @@ Create the name of the service account to use
 {{/*
 Image tag
 */}}
-{{- define "sentinel-waf.imageTag" -}}
+{{- define "zentinel-waf.imageTag" -}}
 {{- default .Chart.AppVersion .Values.image.tag }}
 {{- end }}

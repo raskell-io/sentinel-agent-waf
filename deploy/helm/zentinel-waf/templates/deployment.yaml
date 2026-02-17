@@ -1,16 +1,16 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "sentinel-waf.fullname" . }}
+  name: {{ include "zentinel-waf.fullname" . }}
   labels:
-    {{- include "sentinel-waf.labels" . | nindent 4 }}
+    {{- include "zentinel-waf.labels" . | nindent 4 }}
 spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
   {{- end }}
   selector:
     matchLabels:
-      {{- include "sentinel-waf.selectorLabels" . | nindent 6 }}
+      {{- include "zentinel-waf.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       annotations:
@@ -19,7 +19,7 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
       labels:
-        {{- include "sentinel-waf.labels" . | nindent 8 }}
+        {{- include "zentinel-waf.labels" . | nindent 8 }}
         {{- with .Values.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -28,12 +28,12 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "sentinel-waf.serviceAccountName" . }}
+      serviceAccountName: {{ include "zentinel-waf.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: {{ .Chart.Name }}
-          image: "{{ .Values.image.repository }}:{{ include "sentinel-waf.imageTag" . }}"
+          image: "{{ .Values.image.repository }}:{{ include "zentinel-waf.imageTag" . }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: health
@@ -44,7 +44,7 @@ spec:
               protocol: TCP
           envFrom:
             - configMapRef:
-                name: {{ include "sentinel-waf.fullname" . }}
+                name: {{ include "zentinel-waf.fullname" . }}
           env:
             - name: AGENT_SOCKET
               value: {{ .Values.waf.socketPath | quote }}
@@ -55,7 +55,7 @@ spec:
             {{- end }}
           volumeMounts:
             - name: socket-dir
-              mountPath: /var/run/sentinel
+              mountPath: /var/run/zentinel
             {{- with .Values.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

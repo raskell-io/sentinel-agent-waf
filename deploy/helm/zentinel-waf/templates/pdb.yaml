@@ -2,12 +2,12 @@
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: {{ include "sentinel-waf.fullname" . }}
+  name: {{ include "zentinel-waf.fullname" . }}
   labels:
-    {{- include "sentinel-waf.labels" . | nindent 4 }}
+    {{- include "zentinel-waf.labels" . | nindent 4 }}
 spec:
   minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
   selector:
     matchLabels:
-      {{- include "sentinel-waf.selectorLabels" . | nindent 6 }}
+      {{- include "zentinel-waf.selectorLabels" . | nindent 6 }}
 {{- end }}

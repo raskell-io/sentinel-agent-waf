@@ -1,4 +1,4 @@
-//! Sentinel WAF Agent CLI
+//! Zentinel WAF Agent CLI
 //!
 //! Command-line interface for the Web Application Firewall agent.
 //! Supports both Unix Domain Socket (v1 compatibility) and gRPC (v2) transports.
@@ -9,9 +9,9 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{error, info};
 
-use sentinel_agent_protocol::AgentServer;
-use sentinel_agent_protocol::v2::GrpcAgentServerV2;
-use sentinel_agent_waf::{WafAgent, WafConfig, WebSocketConfig};
+use zentinel_agent_protocol::AgentServer;
+use zentinel_agent_protocol::v2::GrpcAgentServerV2;
+use zentinel_agent_waf::{WafAgent, WafConfig, WebSocketConfig};
 
 /// Version information
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -30,12 +30,12 @@ enum TransportMode {
 
 /// Command line arguments
 #[derive(Parser, Debug)]
-#[command(name = "sentinel-waf-agent")]
-#[command(about = "Web Application Firewall agent for Sentinel reverse proxy")]
+#[command(name = "zentinel-waf-agent")]
+#[command(about = "Web Application Firewall agent for Zentinel reverse proxy")]
 #[command(version = VERSION)]
 struct Args {
     /// Path to Unix socket (UDS transport)
-    #[arg(long, default_value = "/tmp/sentinel-waf.sock", env = "AGENT_SOCKET")]
+    #[arg(long, default_value = "/tmp/zentinel-waf.sock", env = "AGENT_SOCKET")]
     socket: PathBuf,
 
     /// gRPC server address (e.g., "0.0.0.0:50051")
@@ -216,7 +216,7 @@ async fn run_uds_server(agent: WafAgent, socket_path: PathBuf) -> Result<()> {
         "Starting WAF agent with UDS transport"
     );
 
-    let server = AgentServer::new("sentinel-waf-agent", socket_path, Box::new(agent));
+    let server = AgentServer::new("zentinel-waf-agent", socket_path, Box::new(agent));
 
     match server.run().await {
         Ok(()) => {
@@ -245,7 +245,7 @@ async fn run_grpc_server(agent: WafAgent, address: String) -> Result<()> {
     );
 
     // Wrap agent in Arc for the gRPC server (it takes Box<dyn AgentHandlerV2>)
-    let server = GrpcAgentServerV2::new("sentinel-waf-agent", Box::new(agent));
+    let server = GrpcAgentServerV2::new("zentinel-waf-agent", Box::new(agent));
 
     match server.run(addr).await {
         Ok(()) => {
@@ -271,7 +271,7 @@ async fn main() -> Result<()> {
     let log_level = if args.verbose { "debug" } else { "info" };
     tracing_subscriber::fmt()
         .with_env_filter(format!(
-            "{}={},sentinel_agent_protocol=info",
+            "{}={},zentinel_agent_protocol=info",
             env!("CARGO_CRATE_NAME"),
             log_level
         ))
@@ -280,7 +280,7 @@ async fn main() -> Result<()> {
 
     info!(
         version = VERSION,
-        "Starting Sentinel WAF Agent"
+        "Starting Zentinel WAF Agent"
     );
 
     // Setup signal handlers for graceful shutdown

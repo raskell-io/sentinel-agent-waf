@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.4
 
-# Sentinel WAF Agent Container Image
+# Zentinel WAF Agent Container Image
 #
 # Targets:
 #   - prebuilt: For CI with pre-built binaries
@@ -10,16 +10,16 @@
 ################################################################################
 FROM gcr.io/distroless/cc-debian12:nonroot AS prebuilt
 
-COPY sentinel-waf-agent /sentinel-waf-agent
+COPY zentinel-waf-agent /zentinel-waf-agent
 
-LABEL org.opencontainers.image.title="Sentinel WAF Agent" \
-      org.opencontainers.image.description="Sentinel WAF Agent for Sentinel reverse proxy" \
+LABEL org.opencontainers.image.title="Zentinel WAF Agent" \
+      org.opencontainers.image.description="Zentinel WAF Agent for Zentinel reverse proxy" \
       org.opencontainers.image.vendor="Raskell" \
-      org.opencontainers.image.source="https://github.com/raskell-io/sentinel-agent-waf"
+      org.opencontainers.image.source="https://github.com/zentinelproxy/zentinel-agent-waf"
 
-ENV RUST_LOG=info,sentinel_waf_agent=debug \
-    SOCKET_PATH=/var/run/sentinel/waf.sock
+ENV RUST_LOG=info,zentinel_waf_agent=debug \
+    SOCKET_PATH=/var/run/zentinel/waf.sock
 
 USER nonroot:nonroot
 
-ENTRYPOINT ["/sentinel-waf-agent"]
+ENTRYPOINT ["/zentinel-waf-agent"]

@@ -1,9 +1,9 @@
-# Default values for sentinel-waf
+# Default values for zentinel-waf
 
 replicaCount: 2
 
 image:
-  repository: ghcr.io/raskell-io/sentinel-agent-waf
+  repository: ghcr.io/zentinelproxy/zentinel-agent-waf
   pullPolicy: IfNotPresent
   tag: ""  # Defaults to Chart appVersion
 
@@ -87,7 +87,7 @@ topologySpreadConstraints:
     whenUnsatisfiable: ScheduleAnyway
     labelSelector:
       matchLabels:
-        app.kubernetes.io/name: sentinel-waf
+        app.kubernetes.io/name: zentinel-waf
 
 podDisruptionBudget:
   enabled: true
@@ -95,8 +95,8 @@ podDisruptionBudget:
 
 # WAF Configuration
 waf:
-  # Socket path for communication with Sentinel proxy
-  socketPath: /var/run/sentinel/waf.sock
+  # Socket path for communication with Zentinel proxy
+  socketPath: /var/run/zentinel/waf.sock
 
   # Paranoia level (1-4)
   # 1: High-confidence detections only (recommended for production)

@@ -237,14 +237,14 @@ Performance and memory targets validated via comprehensive benchmarking.
 
 These are explicitly out of scope:
 
-- **ModSecurity rule language (SecLang)** - We use native Rust patterns. For SecLang, see [sentinel-agent-modsec](https://github.com/raskell-io/sentinel-agent-modsec)
+- **ModSecurity rule language (SecLang)** - We use native Rust patterns. For SecLang, see [zentinel-agent-modsec](https://github.com/zentinelproxy/zentinel-agent-modsec)
 - **Body content modification** - We block or allow, not sanitize
 
 ---
 
 ## Compatibility
 
-| Sentinel Version | WAF Agent Version | Status |
+| Zentinel Version | WAF Agent Version | Status |
 |------------------|-------------------|--------|
 | 0.1.x | 0.1.x - 0.5.x | Supported |
 

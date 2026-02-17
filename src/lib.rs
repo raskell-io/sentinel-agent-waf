@@ -1,6 +1,6 @@
-//! Sentinel WAF Agent Library
+//! Zentinel WAF Agent Library
 //!
-//! A next-generation Web Application Firewall agent for Sentinel proxy that detects
+//! A next-generation Web Application Firewall agent for Zentinel proxy that detects
 //! and blocks common web attacks with anomaly-based scoring to reduce false positives.
 //!
 //! # Features
@@ -13,8 +13,8 @@
 //! # Example
 //!
 //! ```ignore
-//! use sentinel_agent_waf::{WafAgent, WafConfig};
-//! use sentinel_agent_protocol::AgentServer;
+//! use zentinel_agent_waf::{WafAgent, WafConfig};
+//! use zentinel_agent_protocol::AgentServer;
 //!
 //! let config = WafConfig::default();
 //! let agent = WafAgent::new(config)?;
@@ -54,14 +54,14 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
-use sentinel_agent_protocol::{
+use zentinel_agent_protocol::{
     AgentHandler, AgentResponse, AuditMetadata, ConfigureEvent, HeaderOp, RequestBodyChunkEvent,
     RequestHeadersEvent, ResponseBodyChunkEvent, ResponseHeadersEvent, WebSocketFrameEvent,
     EventType,
 };
 
 // v2 protocol types
-use sentinel_agent_protocol::v2::{
+use zentinel_agent_protocol::v2::{
     AgentCapabilities, AgentFeatures, AgentHandlerV2, CounterMetric, DrainReason, GaugeMetric,
     HealthStatus as V2HealthStatus, MetricsReport, ShutdownReason,
 };
@@ -180,7 +180,7 @@ impl WafMetrics {
     }
 }
 
-/// WAF agent implementing the Sentinel agent protocol
+/// WAF agent implementing the Zentinel agent protocol
 pub struct WafAgent {
     engine: Arc<RwLock<WafEngine>>,
     pending_request_bodies: Arc<RwLock<HashMap<String, BodyInspectionState>>>,
@@ -929,7 +929,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 impl AgentHandlerV2 for WafAgent {
     /// Get agent capabilities for v2 protocol handshake
     fn capabilities(&self) -> AgentCapabilities {
-        AgentCapabilities::new("sentinel-waf-agent", "Sentinel WAF Agent", VERSION)
+        AgentCapabilities::new("zentinel-waf-agent", "Zentinel WAF Agent", VERSION)
             .with_event(EventType::RequestHeaders)
             .with_event(EventType::RequestBodyChunk)
             .with_event(EventType::ResponseHeaders)
@@ -953,12 +953,12 @@ impl AgentHandlerV2 for WafAgent {
     fn health_status(&self) -> V2HealthStatus {
         // Use tokio::runtime::Handle::try_current to check if we're in async context
         // For health check, we do a simple sync check
-        V2HealthStatus::healthy("sentinel-waf-agent")
+        V2HealthStatus::healthy("zentinel-waf-agent")
     }
 
     /// Get current metrics report for v2 protocol
     fn metrics_report(&self) -> Option<MetricsReport> {
-        let mut report = MetricsReport::new("sentinel-waf-agent", 10_000);
+        let mut report = MetricsReport::new("zentinel-waf-agent", 10_000);
 
         // Add counter metrics
         report.counters.push(CounterMetric::new(

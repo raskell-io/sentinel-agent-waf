@@ -1,6 +1,6 @@
-# Sentinel WAF Agent
+# Zentinel WAF Agent
 
-A next-generation Web Application Firewall agent for [Sentinel](https://github.com/raskell-io/sentinel) reverse proxy. Built in **pure Rust** with no C dependencies, featuring heuristic anomaly detection with n-gram analysis, anomaly scoring, and 285 detection rules.
+A next-generation Web Application Firewall agent for [Zentinel](https://github.com/zentinelproxy/zentinel) reverse proxy. Built in **pure Rust** with no C dependencies, featuring heuristic anomaly detection with n-gram analysis, anomaly scoring, and 285 detection rules.
 
 ## Features
 
@@ -39,8 +39,8 @@ A next-generation Web Application Firewall agent for [Sentinel](https://github.c
 ### From Source
 
 ```bash
-git clone https://github.com/raskell-io/sentinel-agent-waf
-cd sentinel-agent-waf
+git clone https://github.com/zentinelproxy/zentinel-agent-waf
+cd zentinel-agent-waf
 cargo build --release
 ```
 
@@ -48,20 +48,20 @@ cargo build --release
 
 ```bash
 # After building
-./target/release/sentinel-waf-agent --socket /var/run/sentinel/waf.sock
+./target/release/zentinel-waf-agent --socket /var/run/zentinel/waf.sock
 ```
 
 ## Quick Start
 
 ```bash
 # Basic usage with default settings
-sentinel-waf-agent --socket /var/run/sentinel/waf.sock
+zentinel-waf-agent --socket /var/run/zentinel/waf.sock
 
 # With higher sensitivity
-sentinel-waf-agent --socket /var/run/sentinel/waf.sock --paranoia-level 2
+zentinel-waf-agent --socket /var/run/zentinel/waf.sock --paranoia-level 2
 
 # Detect-only mode (no blocking)
-sentinel-waf-agent --socket /var/run/sentinel/waf.sock --block-mode false
+zentinel-waf-agent --socket /var/run/zentinel/waf.sock --block-mode false
 ```
 
 ## Configuration
@@ -70,7 +70,7 @@ sentinel-waf-agent --socket /var/run/sentinel/waf.sock --block-mode false
 
 | Option | Environment Variable | Description | Default |
 |--------|---------------------|-------------|---------|
-| `--socket` | `AGENT_SOCKET` | Unix socket path | `/tmp/sentinel-waf.sock` |
+| `--socket` | `AGENT_SOCKET` | Unix socket path | `/tmp/zentinel-waf.sock` |
 | `--paranoia-level` | `WAF_PARANOIA_LEVEL` | Sensitivity (1-4) | `1` |
 | `--block-mode` | `WAF_BLOCK_MODE` | Block or detect-only | `true` |
 | `--config` | `WAF_CONFIG` | JSON config file path | - |
@@ -263,14 +263,14 @@ GET /metrics?format=json
 }
 ```
 
-## Sentinel Proxy Integration
+## Zentinel Proxy Integration
 
 ```kdl
 agents {
     agent "waf" {
         type "custom"
         transport "unix_socket" {
-            path "/var/run/sentinel/waf.sock"
+            path "/var/run/zentinel/waf.sock"
         }
         events ["request_headers", "request_body_chunk", "response_body_chunk"]
         timeout-ms 50
@@ -353,7 +353,7 @@ cargo clippy
 
 ## Comparison with ModSecurity
 
-| Feature | sentinel-agent-waf | ModSecurity CRS |
+| Feature | zentinel-agent-waf | ModSecurity CRS |
 |---------|-------------------|-----------------|
 | Detection Rules | 285 | 800+ |
 | Statistical Detection | ✓ | ✗ |
@@ -370,7 +370,7 @@ cargo clippy
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Sentinel Proxy                           │
+│                    Zentinel Proxy                           │
 └─────────────────────────┬───────────────────────────────────┘
                           │ Unix Socket
                           ▼

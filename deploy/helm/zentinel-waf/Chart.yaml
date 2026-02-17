@@ -1,0 +1,32 @@
+apiVersion: v2
+name: zentinel-waf
+description: Next-generation Web Application Firewall for Zentinel proxy
+type: application
+version: 0.9.0
+appVersion: "0.9.0"
+kubeVersion: ">=1.23.0-0"
+
+home: https://zentinelproxy.io/agents/waf/
+icon: https://zentinelproxy.io/favicon.ico
+sources:
+  - https://github.com/zentinelproxy/zentinel-agent-waf
+
+keywords:
+  - waf
+  - security
+  - firewall
+  - proxy
+  - zentinel
+  - waap
+
+maintainers:
+  - name: Zentinel Core Team
+    url: https://github.com/zentinelproxy
+
+annotations:
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/links: |
+    - name: Documentation
+      url: https://zentinelproxy.io/agents/waf/
+    - name: Source
+      url: https://github.com/zentinelproxy/zentinel-agent-waf

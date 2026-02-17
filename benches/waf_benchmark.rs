@@ -5,7 +5,7 @@
 //! - <50MB steady state memory
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use sentinel_agent_waf::{WafConfig, WafEngine};
+use zentinel_agent_waf::{WafConfig, WafEngine};
 use std::collections::HashMap;
 
 /// Generate realistic test payloads
@@ -238,7 +238,7 @@ fn benchmark_automata(c: &mut Criterion) {
 /// Benchmark API security inspection
 fn benchmark_api_security(c: &mut Criterion) {
     let config = WafConfig {
-        api_security: sentinel_agent_waf::config::ApiSecurityConfig {
+        api_security: zentinel_agent_waf::config::ApiSecurityConfig {
             graphql_enabled: true,
             json_enabled: true,
             jwt_enabled: true,
@@ -284,7 +284,7 @@ fn benchmark_api_security(c: &mut Criterion) {
 /// Benchmark sensitive data detection
 fn benchmark_sensitive_data(c: &mut Criterion) {
     let config = WafConfig {
-        sensitive_data: sentinel_agent_waf::config::SensitiveDataDetectionConfig {
+        sensitive_data: zentinel_agent_waf::config::SensitiveDataDetectionConfig {
             enabled: true,
             credit_card_detection: true,
             ssn_detection: true,

@@ -15,7 +15,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! sentinel-agent-waf = { version = "0.1", features = ["schema-validation"] }
+//! zentinel-agent-waf = { version = "0.1", features = ["schema-validation"] }
 //! ```
 
 pub mod loader;

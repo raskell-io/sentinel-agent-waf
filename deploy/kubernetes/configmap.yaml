@@ -1,10 +1,10 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: sentinel-waf-config
-  namespace: sentinel
+  name: zentinel-waf-config
+  namespace: zentinel
   labels:
-    app.kubernetes.io/name: sentinel-waf
+    app.kubernetes.io/name: zentinel-waf
     app.kubernetes.io/component: waf
 data:
   # WAF Configuration

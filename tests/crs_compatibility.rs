@@ -6,7 +6,7 @@
 //! Note: Some tests are marked with #[ignore] because they require
 //! additional rule coverage that is planned for future releases.
 
-use sentinel_agent_waf::{WafConfig, WafEngine, Detection};
+use zentinel_agent_waf::{WafConfig, WafEngine, Detection};
 
 fn create_engine() -> WafEngine {
     WafEngine::new(WafConfig::default()).expect("Failed to create engine")

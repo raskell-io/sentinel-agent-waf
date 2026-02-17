@@ -1,0 +1,24 @@
+# Zentinel Agent Registry Manifest
+# WAF Agent - Web Application Firewall
+
+[agent]
+name = "zentinel-agent-waf"
+version = "0.1.0"
+description = "Web Application Firewall agent for Zentinel reverse proxy - SQL injection, XSS, and attack detection"
+authors = ["Zentinel Contributors"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/zentinelproxy/zentinel-agent-waf"
+
+[protocol]
+version = "0.1"
+events = ["request_headers"]
+
+[compatibility]
+zentinel-proxy = ">=0.1.0"
+zentinel-agent-protocol = "0.1"
+
+[registry]
+homepage = "https://zentinelproxy.io/agents/waf"
+documentation = "https://zentinelproxy.io/docs/agents/waf"
+keywords = ["zentinel", "agent", "waf", "security", "sqli", "xss"]
+categories = ["security"]

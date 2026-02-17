@@ -2,14 +2,14 @@
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: {{ include "sentinel-waf.fullname" . }}
+  name: {{ include "zentinel-waf.fullname" . }}
   labels:
-    {{- include "sentinel-waf.labels" . | nindent 4 }}
+    {{- include "zentinel-waf.labels" . | nindent 4 }}
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: {{ include "sentinel-waf.fullname" . }}
+    name: {{ include "zentinel-waf.fullname" . }}
   minReplicas: {{ .Values.autoscaling.minReplicas }}
   maxReplicas: {{ .Values.autoscaling.maxReplicas }}
   metrics:

@@ -1,8 +1,8 @@
-//! Integration Tests for Sentinel WAF
+//! Integration Tests for Zentinel WAF
 //!
 //! End-to-end tests simulating real HTTP traffic patterns.
 
-use sentinel_agent_waf::{WafConfig, WafEngine, Detection};
+use zentinel_agent_waf::{WafConfig, WafEngine, Detection};
 use std::collections::HashMap;
 
 /// Test fixture for consistent test setup

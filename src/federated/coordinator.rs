@@ -22,7 +22,7 @@ pub struct CoordinatorConfig {
 impl Default for CoordinatorConfig {
     fn default() -> Self {
         Self {
-            url: "https://federated.sentinel-waf.io/api/v1".to_string(),
+            url: "https://federated.zentinel-waf.io/api/v1".to_string(),
             timeout: Duration::from_secs(30),
             retries: 3,
             api_key: None,

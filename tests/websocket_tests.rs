@@ -1,10 +1,10 @@
-//! WebSocket Inspection Tests for Sentinel WAF
+//! WebSocket Inspection Tests for Zentinel WAF
 //!
 //! Tests for WebSocket frame inspection including attack detection,
 //! fragmentation handling, and configuration options.
 
-use sentinel_agent_waf::{WafAgent, WafConfig, WebSocketConfig};
-use sentinel_agent_protocol::{AgentHandler, WebSocketFrameEvent, AgentResponse, WebSocketDecision};
+use zentinel_agent_waf::{WafAgent, WafConfig, WebSocketConfig};
+use zentinel_agent_protocol::{AgentHandler, WebSocketFrameEvent, AgentResponse, WebSocketDecision};
 use base64::Engine as Base64Engine;
 
 /// Create a WebSocket-enabled agent for testing

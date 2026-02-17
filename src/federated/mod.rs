@@ -108,7 +108,7 @@ impl Default for LocalModel {
         Self {
             weights,
             version: 0,
-            architecture: "sentinel-waf-v1".to_string(),
+            architecture: "zentinel-waf-v1".to_string(),
         }
     }
 }

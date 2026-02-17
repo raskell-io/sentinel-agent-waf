@@ -1,14 +1,14 @@
-//! Integration tests for the WAF agent using the sentinel-agent-protocol.
+//! Integration tests for the WAF agent using the zentinel-agent-protocol.
 //!
 //! These tests spin up an actual AgentServer and connect via AgentClient
 //! to verify the full protocol flow.
 
 use base64::Engine;
-use sentinel_agent_protocol::{
+use zentinel_agent_protocol::{
     AgentClient, AgentServer, ConfigureEvent, Decision, EventType, RequestBodyChunkEvent,
     RequestHeadersEvent, RequestMetadata, ResponseBodyChunkEvent,
 };
-use sentinel_agent_waf::{WafAgent, WafConfig};
+use zentinel_agent_waf::{WafAgent, WafConfig};
 use std::collections::HashMap;
 use std::time::Duration;
 use tempfile::tempdir;
@@ -125,7 +125,7 @@ async fn test_sqli_in_query_string_blocked() {
 
     // Check for WAF headers
     let has_waf_blocked = response.response_headers.iter().any(|h| match h {
-        sentinel_agent_protocol::HeaderOp::Set { name, value } => {
+        zentinel_agent_protocol::HeaderOp::Set { name, value } => {
             name == "X-WAF-Blocked" && value == "true"
         }
         _ => false,
@@ -167,7 +167,7 @@ async fn test_sqli_detect_only_mode() {
     assert!(is_allow(&response.decision), "Expected Allow decision");
 
     let has_waf_detected = response.request_headers.iter().any(|h| match h {
-        sentinel_agent_protocol::HeaderOp::Set { name, .. } => name == "X-WAF-Detected",
+        zentinel_agent_protocol::HeaderOp::Set { name, .. } => name == "X-WAF-Detected",
         _ => false,
     });
     assert!(has_waf_detected, "Expected X-WAF-Detected header");
@@ -556,7 +556,7 @@ async fn test_response_body_xss_detected() {
     assert!(is_allow(&response.decision), "Expected Allow decision");
 
     let has_detection_header = response.response_headers.iter().any(|h| match h {
-        sentinel_agent_protocol::HeaderOp::Set { name, .. } => name == "X-WAF-Response-Detected",
+        zentinel_agent_protocol::HeaderOp::Set { name, .. } => name == "X-WAF-Response-Detected",
         _ => false,
     });
     assert!(
@@ -589,7 +589,7 @@ async fn test_response_body_inspection_disabled_ignores_attack() {
     assert!(is_allow(&response.decision), "Expected Allow decision");
 
     let has_detection_header = response.response_headers.iter().any(|h| match h {
-        sentinel_agent_protocol::HeaderOp::Set { name, .. } => name == "X-WAF-Response-Detected",
+        zentinel_agent_protocol::HeaderOp::Set { name, .. } => name == "X-WAF-Response-Detected",
         _ => false,
     });
     assert!(
@@ -656,7 +656,7 @@ async fn test_scanner_user_agent_detected() {
     // With anomaly scoring, a single scanner detection may not reach block threshold
     // Use lower scoring threshold or detect-only mode
     let config = WafConfig {
-        scoring: sentinel_agent_waf::ScoringConfig {
+        scoring: zentinel_agent_waf::ScoringConfig {
             block_threshold: 10, // Lower threshold for single detections
             ..Default::default()
         },
@@ -854,7 +854,7 @@ async fn test_configure_event_sets_detect_only_mode() {
 
     // Verify detection header is present
     let has_waf_detected = response.request_headers.iter().any(|h| match h {
-        sentinel_agent_protocol::HeaderOp::Set { name, .. } => name == "X-WAF-Detected",
+        zentinel_agent_protocol::HeaderOp::Set { name, .. } => name == "X-WAF-Detected",
         _ => false,
     });
     assert!(has_waf_detected, "Expected X-WAF-Detected header");

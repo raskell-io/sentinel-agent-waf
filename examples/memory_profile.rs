@@ -2,7 +2,7 @@
 //!
 //! Measures steady-state memory usage for different configurations.
 
-use sentinel_agent_waf::{WafConfig, WafEngine};
+use zentinel_agent_waf::{WafConfig, WafEngine};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -104,13 +104,13 @@ fn main() {
 
     let config = WafConfig {
         paranoia_level: 4,
-        api_security: sentinel_agent_waf::config::ApiSecurityConfig {
+        api_security: zentinel_agent_waf::config::ApiSecurityConfig {
             graphql_enabled: true,
             json_enabled: true,
             jwt_enabled: true,
             ..Default::default()
         },
-        sensitive_data: sentinel_agent_waf::config::SensitiveDataDetectionConfig {
+        sensitive_data: zentinel_agent_waf::config::SensitiveDataDetectionConfig {
             enabled: true,
             credit_card_detection: true,
             ssn_detection: true,

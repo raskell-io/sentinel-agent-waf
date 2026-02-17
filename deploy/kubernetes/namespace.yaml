@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: sentinel
+  name: zentinel
   labels:
-    app.kubernetes.io/name: sentinel
+    app.kubernetes.io/name: zentinel
     app.kubernetes.io/component: proxy
