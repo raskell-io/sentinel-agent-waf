@@ -92,8 +92,8 @@ impl RequestHistory {
         }
 
         self.timestamps
-            .windows(2)
-            .map(|w| w[1].duration_since(w[0]))
+            .array_windows()
+            .map(|[a, b]| b.duration_since(*a))
             .collect()
     }
 }
